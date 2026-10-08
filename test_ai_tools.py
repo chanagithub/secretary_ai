@@ -9,11 +9,14 @@
     ไม่ / ยกเลิก / n                  -> ไม่บันทึก
     ทำใหม่ (เช่น "ไม่บันทึก ทำใหม่")   -> ไม่บันทึก แล้วแสดงคำสั่งเดิมให้แก้
   พูดอย่างอื่นจะถามซ้ำ ไม่เดา
+- ถ้าพูดชื่อวันที่ตรงกับวันนี้ (เช่น วันนี้ศุกร์แล้วพูดว่า "วันศุกร์") โค้ดจะถามก่อนว่า
+  วันนี้หรือสัปดาห์หน้า (date_guard.py) แล้วเติมวันที่จริงต่อท้ายคำสั่ง
 - ประวัติแชทส่งให้ AI เฉพาะช่วงที่ AI ถามกลับ (ตอบคำถามต่อได้) และล้างทุกครั้ง
   ที่จบรอบที่มีการเรียกเครื่องมือ
 """
 import ai_client
 import config
+import date_guard
 import tools
 import reminders_tool
 
@@ -47,6 +50,27 @@ def ask_confirm():
         if decision:
             return decision
         print('ไม่เข้าใจคำตอบ ตอบว่า "ใช่" "ไม่" หรือ "ทำใหม่"')
+
+
+def disambiguate_weekday(user_text):
+    """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ให้ถามผู้ใช้ก่อน (โค้ดถามเอง ไม่ผ่าน AI)
+
+    คืนข้อความที่เติมวันที่จริงแล้ว หรือ None ถ้าผู้ใช้ยกเลิก
+    """
+    info = date_guard.find_ambiguous_weekday(user_text)
+    if not info:
+        return user_text
+    print(date_guard.question_text(info))
+    while True:
+        choice = date_guard.classify_choice(
+            input('ตอบ "วันนี้" หรือ "หน้า" (หรือ 1 / 2, "ยกเลิก"): '))
+        if choice:
+            break
+        print('ไม่เข้าใจคำตอบ ตอบว่า "วันนี้" หรือ "หน้า"')
+    if choice == 'cancel':
+        print('ยกเลิก ไม่ส่งคำสั่งนี้')
+        return None
+    return user_text + date_guard.clarify_text(info, choice)
 
 
 def handle_tool_calls(user_text, tool_calls):
@@ -92,6 +116,10 @@ def main():
             print('จบการทดสอบ')
             break
 
+        sent_text = disambiguate_weekday(user_text)
+        if sent_text is None:
+            continue
+
         token = ai_client.CancelToken()
 
         def on_chunk(piece):
@@ -99,7 +127,7 @@ def main():
 
         try:
             text, tool_calls = ai_client.stream_chat_with_tools(
-                user_text, on_chunk, token, tools.ALL_TOOLS, history=history)
+                sent_text, on_chunk, token, tools.ALL_TOOLS, history=history)
         except ai_client.AIError as e:
             print('\nเกิดข้อผิดพลาด:', e)
             continue
@@ -109,7 +137,7 @@ def main():
             print('(AI ตอบเป็นข้อความ ยังไม่ได้สร้างการเตือนใด ๆ '
                   'ถ้า AI ถามกลับ ตอบต่อได้เลย)')
             if text.strip():
-                history.append({'role': 'user', 'content': user_text})
+                history.append({'role': 'user', 'content': sent_text})
                 history.append({'role': 'assistant', 'content': text})
                 history = history[-2 * config.MEMORY_PAIRS:]
             continue
