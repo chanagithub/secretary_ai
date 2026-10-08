@@ -1,25 +1,16 @@
 """app_ui.py - หน้าจอหลักของ AI เลขาส่วนตัว (เฟส 0: UI)
 
 ตั้งชื่อ app_ui แทน ui เพราะชื่อ ui จะไปบังโมดูล ui ของ Pythonista
-เฟสนี้ยังไม่ต่อ AI จริง ใช้ mock_ai() จำลองผลลัพธ์เพื่อทดสอบหน้าจอ
-รันไฟล์นี้ใน Pythonista (ต้องมี config.py อยู่โฟลเดอร์เดียวกัน)
+ต่อ AI จริงผ่าน ai_client (ตอนนี้ AI ตอบเป็นข้อความอย่างเดียว ยังไม่มีเครื่องมือ)
+รันไฟล์นี้ใน Pythonista (ต้องมี config.py และ ai_client.py อยู่โฟลเดอร์เดียวกัน)
 """
+import threading
+
 import ui
 import dialogs
 import console
 import config
-
-
-def mock_ai(text, model):
-    """จำลองคำตอบของ AI - จะถูกแทนด้วย ai_client ในขั้นถัดไป"""
-    return {
-        'title': 'จะทำรายการนี้ใช่ไหม (ข้อมูลจำลอง)',
-        'lines': [
-            ('คำสั่งที่ได้รับ', text),
-            ('โมเดลที่ใช้', model),
-            ('สถานะ', 'ยังไม่ได้ต่อ AI จริง'),
-        ],
-    }
+import ai_client
 
 
 class ConfirmOverlay(ui.View):
@@ -95,7 +86,8 @@ class MainView(ui.View):
         self.name = 'AI เลขาส่วนตัว'
         self.background_color = 'white'
         self._overlay = None
-        self._pending = None
+        self._token = None  # งานที่กำลังรอ AI อยู่ (None = ว่าง)
+        self._partial = ''  # คำตอบที่ได้รับแล้วระหว่างรอ
 
         self.model_btn = ui.Button()
         self.model_btn.font = ('<system>', 14)
@@ -185,6 +177,10 @@ class MainView(ui.View):
         self.output.text = text
 
     def send(self, sender):
+        # ระหว่างรอ AI ปุ่มนี้กลายเป็นปุ่ม "หยุด"
+        if self._token is not None:
+            self.stop()
+            return
         if self._overlay is not None and self._overlay.superview:
             return
         text = self.input.text.strip()
@@ -192,8 +188,70 @@ class MainView(ui.View):
             console.hud_alert('พิมพ์หรือพูดคำสั่งก่อน', 'error', 1.2)
             return
         self.input.end_editing()
-        action = mock_ai(text, config.get_current_model())
-        self.ask_confirm(action)
+        self.start_request(text)
+
+    def _set_busy(self, busy):
+        if busy:
+            self.send_btn.title = 'หยุด'
+            self.send_btn.background_color = '#ff3b30'
+        else:
+            self.send_btn.title = 'ส่ง'
+            self.send_btn.background_color = '#007aff'
+
+    def start_request(self, text):
+        token = ai_client.CancelToken()
+        self._token = token
+        self._partial = ''
+        self._set_busy(True)
+        self.show_output('กำลังคิด...')
+        model = config.get_current_model()
+        received = []
+
+        def on_chunk(piece):
+            received.append(piece)
+            snapshot = ''.join(received)
+            ui.delay(lambda: self._on_progress(token, snapshot), 0)
+
+        def worker():
+            error = None
+            try:
+                ai_client.stream_chat(text, on_chunk, token, model)
+            except ai_client.AIError as e:
+                error = str(e)
+            except Exception as e:
+                error = 'เกิดข้อผิดพลาดที่ไม่คาดคิด: %s' % e
+            final = ''.join(received)
+            ui.delay(lambda: self._on_done(token, final, error), 0)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_progress(self, token, text):
+        if token is not self._token:  # ถูกกดหยุดไปแล้ว
+            return
+        self._partial = text
+        self.show_output(text)
+
+    def _on_done(self, token, text, error):
+        if token is not self._token:  # ถูกกดหยุดไปแล้ว
+            return
+        self._token = None
+        self._set_busy(False)
+        if error:
+            self.show_output((text + '\n\n' if text else '') + error)
+            return
+        self.show_output(text or '(AI ไม่ได้ตอบกลับ)')
+        self.input.text = ''
+
+    def stop(self):
+        token = self._token
+        if token is None:
+            return
+        token.cancel()
+        partial = self._partial
+        self._token = None
+        self._set_busy(False)
+        self.show_output((partial + '\n\n' if partial else '')
+                         + 'หยุดแล้ว ไม่ได้ทำรายการใด ๆ')
 
     def ask_confirm(self, action):
         def on_ok():

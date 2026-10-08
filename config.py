@@ -9,8 +9,8 @@ import re
 
 DEFAULT_MODEL = 'deepseek/deepseek-chat-v3-0324'
 
-KEYCHAIN_SERVICE = 'secretary_ai'
-KEYCHAIN_ACCOUNT = 'openrouter_api_key'
+KEYCHAIN_SERVICE = 'openrouter'  # ตรงกับ setup_key.py
+KEYCHAIN_ACCOUNT = 'api_key'
 
 _SETTINGS_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'settings.json')
