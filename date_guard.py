@@ -72,9 +72,10 @@ def classify_choice(text):
         return None
     if 'ยกเลิก' in t:
         return 'cancel'
-    if t in ('1', '๑'):
+    n = t[len('ข้อ'):] if t.startswith('ข้อ') else t  # "ข้อหนึ่ง" / "ข้อ 2"
+    if n in ('1', '๑', 'หนึ่ง'):
         return 'today'
-    if t in ('2', '๒'):
+    if n in ('2', '๒', 'สอง'):
         return 'next'
     today_hit = 'นี้' in t
     next_hit = any(w in t for w in ('หน้า', 'ถัดไป', 'ต่อไป', 'สัปดาห์', 'อาทิตย์'))
