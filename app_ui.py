@@ -237,9 +237,16 @@ class MainView(ui.View):
 
         def on_pick(text):
             self.input.text = text
-            self.input.selected_range = (len(text), len(text))
             table.close()
-            ui.delay(self.input.begin_editing, 0.4)
+
+            def focus_input():
+                self.input.begin_editing()
+                try:  # เลื่อนเคอร์เซอร์ไปท้ายข้อความ (นับเป็นหน่วย UTF-16)
+                    end = len(text.encode('utf-16-le')) // 2
+                    self.input.selected_range = (end, end)
+                except ValueError:
+                    pass
+            ui.delay(focus_input, 0.4)
 
         def on_clear(btn):
             try:
