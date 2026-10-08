@@ -176,3 +176,134 @@ def stream_chat(user_text, on_chunk, token, model=None, history=None):
     finally:
         _close_quietly(resp)
     return ''.join(parts)
+
+def _system_prompt(tools_enabled=False):
+    now = datetime.datetime.now()
+    header = (
+        'คุณคือเลขาส่วนตัวของผู้ใช้ ตอบเป็นภาษาไทย กระชับ ตรงประเด็น\n'
+        'ขณะนี้คือ %s ที่ %s เวลา %s น. (ปี ค.ศ.)\n'
+        % (_WEEKDAYS_TH[now.weekday()], now.strftime('%Y-%m-%d'),
+           now.strftime('%H:%M'))
+    )
+    if tools_enabled:
+        return header + (
+            'คุณมีเครื่องมือ create_reminder สำหรับสร้างการเตือนความจำ/นัดหมายจริง\n'
+            'เมื่อผู้ใช้พูดถึงนัดหมายหรือสิ่งที่ต้องทำ ให้เรียกเครื่องมือนี้ '
+            'โดยคำนวณ due_date จากวันที่ปัจจุบันข้างบนเสมอ (ห้ามเดาปีหรือวันเอง)\n'
+            'ถ้าข้อมูลไม่ครบ (เช่น ไม่รู้เวลา) ให้ถามผู้ใช้กลับก่อน ห้ามเดาเอง\n'
+            'ห้ามบอกว่าสร้างให้แล้วจนกว่าเครื่องมือจะทำงานสำเร็จจริง'
+        )
+    return header + (
+        'ตอนนี้ยังไม่มีเครื่องมือสร้างการเตือนหรือบันทึกรายการใด ๆ '
+        'ถ้าผู้ใช้สั่งให้ทำสิ่งเหล่านี้ ให้บอกตรง ๆ ว่ายังทำไม่ได้ '
+        'ห้ามบอกว่าทำให้แล้ว'
+    )
+    
+def stream_chat_with_tools(user_text, on_chunk, token, tools, model=None, history=None):
+    """เหมือน stream_chat แต่เปิดให้ AI เรียกเครื่องมือ (tool calling) ได้
+
+    tools: list ของ tool schema (เช่น tools.ALL_TOOLS จาก tools.py)
+    คืนค่า: (text, tool_calls)
+      text = ข้อความที่ AI พิมพ์ตอบปกติ (อาจว่างถ้า AI เลือกเรียกเครื่องมือล้วน ๆ)
+      tool_calls = list ของ dict {'id':.., 'name':.., 'arguments': dict}
+    ถ้ามีปัญหาจะ raise AIError เหมือน stream_chat
+    """
+    key = config.get_api_key()
+    if not key:
+        raise AIError('ไม่พบ API key ใน keychain (รัน setup_key.py ก่อน)')
+    model = model or config.get_current_model()
+
+    payload = {
+        'model': model,
+        'stream': True,
+        'tools': tools,
+        'tool_choice': 'auto',
+        'messages': (
+            [{'role': 'system', 'content': _system_prompt(tools_enabled=True)}]
+            + list(history or [])
+            + [{'role': 'user', 'content': user_text}]
+        ),
+    }
+    headers = {
+        'Authorization': 'Bearer ' + key,
+        'Content-Type': 'application/json',
+    }
+
+    try:
+        resp = requests.post(API_URL, headers=headers, json=payload,
+                             stream=True, timeout=(10, 60))
+    except requests.exceptions.Timeout:
+        raise AIError('เชื่อมต่อ OpenRouter ไม่ทัน ลองใหม่อีกครั้ง')
+    except requests.exceptions.RequestException:
+        raise AIError('เน็ตมีปัญหา เชื่อมต่อ OpenRouter ไม่ได้')
+
+    token.attach(resp)
+    if token.cancelled:
+        return '', []
+
+    if resp.status_code != 200:
+        try:
+            raise AIError(_http_error_message(resp))
+        finally:
+            _close_quietly(resp)
+
+    parts = []
+    tool_acc = {}  # index -> {'id':.., 'name':.., 'arguments': str สะสม}
+    try:
+        for raw in resp.iter_lines(chunk_size=16):
+            if token.cancelled:
+                break
+            if not raw:
+                continue
+            line = raw.decode('utf-8', errors='replace').strip()
+            if not line.startswith('data:'):
+                continue
+            data = line[5:].strip()
+            if data == '[DONE]':
+                break
+            try:
+                obj = json.loads(data)
+            except ValueError:
+                continue
+            if obj.get('error'):
+                err = obj['error']
+                text = err.get('message', '') if isinstance(err, dict) else str(err)
+                raise AIError('AI ตอบกลับผิดพลาดระหว่างทาง: %s' % text)
+            choices = obj.get('choices') or []
+            if not choices:
+                continue
+            delta = choices[0].get('delta') or {}
+            piece = delta.get('content')
+            if piece:
+                parts.append(piece)
+                on_chunk(piece)
+            for tc in (delta.get('tool_calls') or []):
+                idx = tc.get('index', 0)
+                slot = tool_acc.setdefault(idx, {'id': None, 'name': None, 'arguments': ''})
+                if tc.get('id'):
+                    slot['id'] = tc['id']
+                fn = tc.get('function') or {}
+                if fn.get('name'):
+                    slot['name'] = fn['name']
+                if fn.get('arguments'):
+                    slot['arguments'] += fn['arguments']
+    except AIError:
+        raise
+    except Exception:
+        if not token.cancelled:
+            raise AIError('การเชื่อมต่อขาดระหว่างรับคำตอบ ลองใหม่อีกครั้ง')
+    finally:
+        _close_quietly(resp)
+
+    tool_calls = []
+    for idx in sorted(tool_acc.keys()):
+        slot = tool_acc[idx]
+        if not slot['name']:
+            continue
+        try:
+            args = json.loads(slot['arguments']) if slot['arguments'] else {}
+        except ValueError:
+            args = {}
+        tool_calls.append({'id': slot['id'], 'name': slot['name'], 'arguments': args})
+
+    return ''.join(parts), tool_calls
