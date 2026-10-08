@@ -84,6 +84,41 @@ class ConfirmOverlay(ui.View):
         self._on_cancel()
 
 
+class HistorySource:
+    """data source ของตารางประวัติคำสั่ง (แตะ = เลือก, ปัดซ้าย = ลบ)"""
+
+    def __init__(self, items, on_pick):
+        self.items = items
+        self.on_pick = on_pick
+
+    def tableview_number_of_sections(self, tableview):
+        return 1
+
+    def tableview_number_of_rows(self, tableview, section):
+        return len(self.items)
+
+    def tableview_cell_for_row(self, tableview, section, row):
+        cell = ui.TableViewCell()
+        cell.text_label.text = self.items[row]
+        cell.text_label.font = ('<system>', 15)
+        cell.text_label.number_of_lines = 2
+        return cell
+
+    def tableview_can_delete(self, tableview, section, row):
+        return True
+
+    def tableview_can_move(self, tableview, section, row):
+        return False
+
+    def tableview_delete(self, tableview, section, row):
+        text = self.items.pop(row)
+        config.remove_history(text)
+        tableview.delete_rows([row])
+
+    def tableview_did_select(self, tableview, section, row):
+        self.on_pick(self.items[row])
+
+
 class MainView(ui.View):
     def __init__(self):
         super().__init__()
@@ -100,6 +135,15 @@ class MainView(ui.View):
         self.model_btn.corner_radius = 8
         self.model_btn.action = self.show_model_picker
         self.add_subview(self.model_btn)
+
+        self.history_btn = ui.Button()
+        self.history_btn.title = 'ประวัติ'
+        self.history_btn.font = ('<system>', 14)
+        self.history_btn.border_width = 1
+        self.history_btn.border_color = '#c7c7cc'
+        self.history_btn.corner_radius = 8
+        self.history_btn.action = self.show_history_picker
+        self.add_subview(self.history_btn)
 
         self.input = ui.TextView()
         self.input.font = ('<system>', 17)
@@ -128,7 +172,8 @@ class MainView(ui.View):
     def layout(self):
         m = 12
         w, h = self.width, self.height
-        self.model_btn.frame = (m, m, w - 2 * m, 36)
+        self.model_btn.frame = (m, m, w - 3 * m - 76, 36)
+        self.history_btn.frame = (w - m - 76, m, 76, 36)
         self.input.frame = (m, 56, w - 2 * m, 120)
         self.send_btn.frame = (m, 184, w - 2 * m, 44)
         self.output.frame = (m, 240, w - 2 * m, max(h - 252, 50))
@@ -176,6 +221,43 @@ class MainView(ui.View):
         table.right_button_items = [ui.ButtonItem(title='+ เพิ่ม', action=on_add)]
         table.present('sheet')
 
+    # ---------- ประวัติคำสั่ง ----------
+    def show_history_picker(self, sender):
+        if self._token is not None:
+            console.hud_alert('รอ AI ตอบหรือกดหยุดก่อน', 'error', 1.5)
+            return
+        items = config.get_history()
+        if not items:
+            console.hud_alert('ยังไม่มีประวัติ', 'error', 1.2)
+            return
+
+        table = ui.TableView()
+        table.name = 'ประวัติคำสั่ง'
+        table.row_height = 64
+
+        def on_pick(text):
+            self.input.text = text
+            self.input.selected_range = (len(text), len(text))
+            table.close()
+            ui.delay(self.input.begin_editing, 0.4)
+
+        def on_clear(btn):
+            try:
+                console.alert('ล้างประวัติทั้งหมด?',
+                              'ลบคำสั่งที่เคยส่งทั้งหมด', 'ล้าง')
+            except KeyboardInterrupt:  # กดยกเลิก
+                return
+            config.clear_history()
+            source.items[:] = []
+            table.reload()
+
+        source = HistorySource(items, on_pick)
+        table.data_source = source
+        table.delegate = source
+        table.right_button_items = [
+            ui.ButtonItem(title='ล้างทั้งหมด', action=on_clear)]
+        table.present('sheet')
+
     # ---------- ส่งคำสั่ง + ยืนยัน ----------
     def show_output(self, text):
         self.output.text = text
@@ -192,6 +274,7 @@ class MainView(ui.View):
             console.hud_alert('พิมพ์หรือพูดคำสั่งก่อน', 'error', 1.2)
             return
         self.input.end_editing()
+        config.add_history(text)
         self.start_request(text)
 
     def _set_busy(self, busy):

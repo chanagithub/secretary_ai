@@ -83,6 +83,48 @@ def add_model(text):
     return True, model
 
 
+# ---------- ประวัติคำสั่งที่เคยส่ง (ล่าสุดอยู่บนสุด) ----------
+MAX_HISTORY = 50
+_HISTORY_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'history.json')
+
+
+def get_history():
+    try:
+        with open(_HISTORY_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [t for t in data if isinstance(t, str) and t.strip()]
+
+
+def _save_history(items):
+    tmp_path = _HISTORY_PATH + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, _HISTORY_PATH)
+
+
+def add_history(text):
+    """บันทึกคำสั่งที่ส่ง ถ้าซ้ำของเดิมจะย้ายขึ้นบนสุด เก็บล่าสุด MAX_HISTORY รายการ"""
+    text = (text or '').strip()
+    if not text:
+        return
+    items = [t for t in get_history() if t != text]
+    items.insert(0, text)
+    _save_history(items[:MAX_HISTORY])
+
+
+def remove_history(text):
+    _save_history([t for t in get_history() if t != text])
+
+
+def clear_history():
+    _save_history([])
+
+
 def get_api_key():
     try:
         import keychain
