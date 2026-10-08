@@ -8,7 +8,8 @@ import json
 import os
 import re
 
-DEFAULT_MODEL = 'deepseek/deepseek-chat-v3-0324'
+#DEFAULT_MODEL = 'deepseek/deepseek-chat-v3-0324'
+DEFAULT_MODEL = 'google/gemini-2.5-flash-lite'
 
 KEYCHAIN_SERVICE = 'openrouter'  # ตรงกับ setup_key.py
 KEYCHAIN_ACCOUNT = 'api_key'
