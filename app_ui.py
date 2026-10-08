@@ -71,12 +71,16 @@ class ConfirmOverlay(ui.View):
         body_y = pad + 54
         self.body.frame = (pad, body_y, cw - 2 * pad, btn_y - body_y - pad)
 
+    def _close(self):
+        if self.superview:
+            self.superview.remove_subview(self)
+
     def _ok(self, sender):
-        self.remove_from_superview()
+        self._close()
         self._on_ok()
 
     def _cancel(self, sender):
-        self.remove_from_superview()
+        self._close()
         self._on_cancel()
 
 
