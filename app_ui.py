@@ -529,7 +529,7 @@ class MainView(ui.View):
 
         def on_pick(chat_id):
             table.close()
-            ui.delay(lambda: self.show_chat_viewer(chat_id), 0.45)
+            ui.delay(lambda: self.show_chat_viewer(chat_id), 0.6)
 
         def on_delete(chat_id):
             config.delete_chat(chat_id)
@@ -560,7 +560,17 @@ class MainView(ui.View):
             console.hud_alert('ไม่พบแชทนี้', 'error', 1.5)
             return
         viewer = ChatViewer(chat, lambda: self._continue_chat(chat, viewer))
-        viewer.present('sheet')
+        self._present_when_ready(viewer, 10)
+
+    def _present_when_ready(self, viewer, attempts):
+        """เปิดหน้าใหม่ทับ sheet ที่เพิ่งปิด: ถ้าแอนิเมชันยังไม่จบจะลองใหม่ทุก 0.3 วินาที"""
+        try:
+            viewer.present('sheet')
+        except ValueError:  # view is already being presented or animation
+            if attempts <= 0:
+                console.hud_alert('เปิดแชทไม่สำเร็จ ลองกดใหม่อีกครั้ง', 'error', 2)
+                return
+            ui.delay(lambda: self._present_when_ready(viewer, attempts - 1), 0.3)
 
     def _continue_chat(self, chat, viewer):
         if self._busy_warning():
