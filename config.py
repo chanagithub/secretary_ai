@@ -3,6 +3,7 @@
 เก็บ: โมเดลเริ่มต้น, รายการโมเดลที่เคยใช้, โมเดลที่เลือกอยู่ (ไฟล์ settings.json
 วางข้างไฟล์นี้) และตัวช่วยเข้าถึง API key ผ่าน keychain (ไม่ฝัง key ในโค้ด)
 """
+import datetime
 import json
 import os
 import re
@@ -123,6 +124,93 @@ def remove_history(text):
 
 def clear_history():
     _save_history([])
+
+
+# ---------- บันทึกแชท (chat_log.json) ----------
+MEMORY_PAIRS = 5  # จำนวนคู่ถามตอบล่าสุดที่ส่งให้ AI จำ
+MAX_CHATS = 100   # เก็บแชทล่าสุดกี่เรื่อง (เก่ากว่านั้นถูกลบอัตโนมัติ)
+_CHATS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'chat_log.json')
+
+
+def now_text():
+    return datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+
+
+def new_chat_id():
+    return datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+
+
+def _load_chats():
+    try:
+        with open(_CHATS_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [c for c in data
+            if isinstance(c, dict) and isinstance(c.get('id'), str)
+            and isinstance(c.get('turns'), list)]
+
+
+def _save_chats(chats):
+    tmp_path = _CHATS_PATH + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(chats[:MAX_CHATS], f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, _CHATS_PATH)
+
+
+def append_turn(chat_id, turn):
+    """เพิ่มหนึ่งรอบถามตอบเข้าแชท (ถ้ายังไม่มีแชทนี้จะสร้างใหม่) แล้วย้ายแชทขึ้นบนสุด
+
+    turn = {'time', 'model', 'user', 'ai', 'status': ok|stopped|error, 'error'?}
+    """
+    chats = _load_chats()
+    chat = None
+    for c in chats:
+        if c['id'] == chat_id:
+            chat = c
+            break
+    if chat is None:
+        chat = {'id': chat_id, 'started': now_text(), 'turns': []}
+    else:
+        chats.remove(chat)
+    chat['turns'].append(turn)
+    chat['updated'] = now_text()
+    chats.insert(0, chat)
+    _save_chats(chats)
+
+
+def list_chats():
+    """สรุปแชททั้งหมด ใหม่ไปเก่า (ไม่รวมเนื้อหาเต็ม)"""
+    result = []
+    for c in _load_chats():
+        turns = c['turns']
+        first = ''
+        if turns and isinstance(turns[0], dict):
+            first = turns[0].get('user', '')
+        result.append({'id': c['id'],
+                       'started': c.get('started', ''),
+                       'updated': c.get('updated', ''),
+                       'first_user': first,
+                       'count': len(turns)})
+    return result
+
+
+def get_chat(chat_id):
+    for c in _load_chats():
+        if c['id'] == chat_id:
+            return c
+    return None
+
+
+def delete_chat(chat_id):
+    _save_chats([c for c in _load_chats() if c['id'] != chat_id])
+
+
+def clear_chats():
+    _save_chats([])
 
 
 def get_api_key():

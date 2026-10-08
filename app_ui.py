@@ -13,6 +13,30 @@ import config
 import ai_client
 
 
+HINT_TEXT = 'พิมพ์ หรือกดไมค์บนคีย์บอร์ดเพื่อพูด แล้วกดส่ง'
+_SEPARATOR = '\n\n' + '─' * 14 + '\n\n'
+
+
+def format_turn(turn):
+    """แปลงหนึ่งรอบถามตอบเป็นข้อความสำหรับแสดงบนจอ"""
+    ai = turn.get('ai') or ''
+    status = turn.get('status', 'ok')
+    if status == 'live':
+        ai = ai or 'กำลังคิด...'
+    elif status == 'stopped':
+        ai = (ai + '\n' if ai else '') + '(หยุดกลางคัน)'
+    elif status == 'error':
+        ai = (ai + '\n' if ai else '') + '(ผิดพลาด: %s)' % turn.get('error', '')
+    elif not ai.strip():
+        ai = '(AI ไม่ได้ตอบกลับ)'
+    return 'คุณ · %s\n%s\n\nAI\n%s' % (
+        turn.get('time', ''), turn.get('user', ''), ai)
+
+
+def format_chat(turns):
+    return _SEPARATOR.join(format_turn(t) for t in turns if isinstance(t, dict))
+
+
 class ConfirmOverlay(ui.View):
     """หน้ายืนยันก่อนเขียนทุกครั้ง (กลไกกลาง ใช้ซ้ำได้ทุกเฟส)"""
 
@@ -119,6 +143,80 @@ class HistorySource:
         self.on_pick(self.items[row])
 
 
+class ChatListSource:
+    """data source ของรายการแชทเก่า (แตะ = เปิดดู, ปัดซ้าย = ลบ)"""
+
+    def __init__(self, chats, on_pick, on_delete):
+        self.chats = chats
+        self.on_pick = on_pick
+        self.on_delete = on_delete
+
+    def tableview_number_of_sections(self, tableview):
+        return 1
+
+    def tableview_number_of_rows(self, tableview, section):
+        return len(self.chats)
+
+    def tableview_cell_for_row(self, tableview, section, row):
+        chat = self.chats[row]
+        cell = ui.TableViewCell('subtitle')
+        first = chat['first_user'].replace('\n', ' ') or '(ไม่มีข้อความ)'
+        cell.text_label.text = first
+        cell.text_label.font = ('<system>', 15)
+        cell.detail_text_label.text = '%s · %d คำถาม' % (
+            chat['updated'] or chat['started'], chat['count'])
+        return cell
+
+    def tableview_can_delete(self, tableview, section, row):
+        return True
+
+    def tableview_can_move(self, tableview, section, row):
+        return False
+
+    def tableview_delete(self, tableview, section, row):
+        chat = self.chats.pop(row)
+        self.on_delete(chat['id'])
+        tableview.delete_rows([row])
+
+    def tableview_did_select(self, tableview, section, row):
+        self.on_pick(self.chats[row]['id'])
+
+
+class ChatViewer(ui.View):
+    """หน้าอ่านแชทเก่า พร้อมปุ่มคุยต่อ"""
+
+    def __init__(self, chat, on_continue):
+        super().__init__()
+        self.name = chat.get('started') or 'แชทเก่า'
+        self.background_color = 'white'
+        self._on_continue = on_continue
+
+        self.body = ui.TextView()
+        self.body.editable = False
+        self.body.font = ('<system>', 16)
+        self.body.text = format_chat(chat['turns'])
+        self.add_subview(self.body)
+
+        self.continue_btn = ui.Button()
+        self.continue_btn.title = 'คุยต่อจากแชทนี้'
+        self.continue_btn.font = ('<system-bold>', 17)
+        self.continue_btn.background_color = '#007aff'
+        self.continue_btn.tint_color = 'white'
+        self.continue_btn.corner_radius = 10
+        self.continue_btn.action = self._continue
+        self.add_subview(self.continue_btn)
+
+    def layout(self):
+        m = 12
+        self.continue_btn.frame = (m, self.height - m - 44,
+                                   self.width - 2 * m, 44)
+        self.body.frame = (m, m, self.width - 2 * m,
+                           max(self.height - 3 * m - 44, 50))
+
+    def _continue(self, sender):
+        self._on_continue()
+
+
 class MainView(ui.View):
     def __init__(self):
         super().__init__()
@@ -126,7 +224,9 @@ class MainView(ui.View):
         self.background_color = 'white'
         self._overlay = None
         self._token = None  # งานที่กำลังรอ AI อยู่ (None = ว่าง)
-        self._partial = ''  # คำตอบที่ได้รับแล้วระหว่างรอ
+        self._chat_id = None  # แชทที่เปิดอยู่ (None = ยังไม่มีข้อความแรก)
+        self._turns = []      # รอบถามตอบของแชทที่เปิดอยู่
+        self._live = None     # รอบที่กำลังรอ AI ตอบ
 
         self.model_btn = ui.Button()
         self.model_btn.font = ('<system>', 14)
@@ -164,10 +264,14 @@ class MainView(ui.View):
         self.output = ui.TextView()
         self.output.editable = False
         self.output.font = ('<system>', 16)
-        self.output.text = 'พิมพ์ หรือกดไมค์บนคีย์บอร์ดเพื่อพูด แล้วกดส่ง'
         self.add_subview(self.output)
 
+        self.right_button_items = [
+            ui.ButtonItem(title='แชทเก่า', action=self.show_chats),
+            ui.ButtonItem(title='เริ่มใหม่', action=self.new_chat)]
+
         self.refresh_model_button()
+        self.render()
 
     def layout(self):
         m = 12
@@ -269,6 +373,24 @@ class MainView(ui.View):
     def show_output(self, text):
         self.output.text = text
 
+    def render(self):
+        turns = list(self._turns)
+        if self._live is not None:
+            turns.append(self._live)
+        if not turns:
+            self.output.text = HINT_TEXT
+            return
+        self.output.text = format_chat(turns)
+        self._scroll_to_bottom()
+        ui.delay(self._scroll_to_bottom, 0.05)
+
+    def _scroll_to_bottom(self):
+        try:
+            y = self.output.content_size[1] - self.output.height
+            self.output.content_offset = (0, max(y, 0))
+        except Exception:  # ถ้า TextView ไม่รองรับ ก็แค่ไม่เลื่อนอัตโนมัติ
+            pass
+
     def send(self, sender):
         # ระหว่างรอ AI ปุ่มนี้กลายเป็นปุ่ม "หยุด"
         if self._token is not None:
@@ -292,13 +414,25 @@ class MainView(ui.View):
             self.send_btn.title = 'ส่ง'
             self.send_btn.background_color = '#007aff'
 
+    def _memory_messages(self):
+        """ข้อความที่ให้ AI จำ: MEMORY_PAIRS คู่ล่าสุดที่สำเร็จ (ไม่รวมรอบที่หยุด/ผิดพลาด)"""
+        done = [t for t in self._turns
+                if t.get('status') == 'ok' and (t.get('ai') or '').strip()]
+        messages = []
+        for t in done[-config.MEMORY_PAIRS:]:
+            messages.append({'role': 'user', 'content': t.get('user', '')})
+            messages.append({'role': 'assistant', 'content': t['ai']})
+        return messages
+
     def start_request(self, text):
         token = ai_client.CancelToken()
         self._token = token
-        self._partial = ''
-        self._set_busy(True)
-        self.show_output('กำลังคิด...')
         model = config.get_current_model()
+        history = self._memory_messages()  # เก็บก่อนเพิ่มข้อความใหม่
+        self._live = {'time': config.now_text(), 'model': model,
+                      'user': text, 'ai': '', 'status': 'live'}
+        self._set_busy(True)
+        self.render()
         received = []
 
         def on_chunk(piece):
@@ -309,7 +443,7 @@ class MainView(ui.View):
         def worker():
             error = None
             try:
-                ai_client.stream_chat(text, on_chunk, token, model)
+                ai_client.stream_chat(text, on_chunk, token, model, history)
             except ai_client.AIError as e:
                 error = str(e)
             except Exception as e:
@@ -320,10 +454,27 @@ class MainView(ui.View):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_progress(self, token, text):
-        if token is not self._token:  # ถูกกดหยุดไปแล้ว
+        if token is not self._token or self._live is None:  # ถูกกดหยุดไปแล้ว
             return
-        self._partial = text
-        self.show_output(text)
+        self._live['ai'] = text
+        self.render()
+
+    def _finish_turn(self, text, status, error=None):
+        """ปิดรอบที่กำลังรอ แล้วบันทึกลงแชทและไฟล์"""
+        turn = self._live
+        self._live = None
+        turn['ai'] = text
+        turn['status'] = status
+        if error:
+            turn['error'] = error
+        if self._chat_id is None:
+            self._chat_id = config.new_chat_id()
+        self._turns.append(turn)
+        try:
+            config.append_turn(self._chat_id, turn)
+        except OSError:
+            console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
+        self.render()
 
     def _on_done(self, token, text, error):
         if token is not self._token:  # ถูกกดหยุดไปแล้ว
@@ -331,9 +482,9 @@ class MainView(ui.View):
         self._token = None
         self._set_busy(False)
         if error:
-            self.show_output((text + '\n\n' if text else '') + error)
+            self._finish_turn(text, 'error', error)
             return
-        self.show_output(text or '(AI ไม่ได้ตอบกลับ)')
+        self._finish_turn(text, 'ok')
         self.input.text = ''
 
     def stop(self):
@@ -341,11 +492,84 @@ class MainView(ui.View):
         if token is None:
             return
         token.cancel()
-        partial = self._partial
+        text = self._live['ai'] if self._live else ''
         self._token = None
         self._set_busy(False)
-        self.show_output((partial + '\n\n' if partial else '')
-                         + 'หยุดแล้ว ไม่ได้ทำรายการใด ๆ')
+        self._finish_turn(text, 'stopped')
+
+    # ---------- เริ่มใหม่ / แชทเก่า ----------
+    def _busy_warning(self):
+        if self._token is not None:
+            console.hud_alert('รอ AI ตอบหรือกดหยุดก่อน', 'error', 1.5)
+            return True
+        return False
+
+    def _reset_chat(self):
+        self._chat_id = None
+        self._turns = []
+        self._live = None
+        self.render()
+
+    def new_chat(self, sender):
+        if self._busy_warning():
+            return
+        self._reset_chat()
+
+    def show_chats(self, sender):
+        if self._busy_warning():
+            return
+        chats = config.list_chats()
+        if not chats:
+            console.hud_alert('ยังไม่มีแชทเก่า', 'error', 1.2)
+            return
+
+        table = ui.TableView()
+        table.name = 'แชทเก่า'
+        table.row_height = 64
+
+        def on_pick(chat_id):
+            table.close()
+            ui.delay(lambda: self.show_chat_viewer(chat_id), 0.45)
+
+        def on_delete(chat_id):
+            config.delete_chat(chat_id)
+            if chat_id == self._chat_id:  # ลบแชทที่เปิดอยู่ ให้ล้างจอด้วย
+                self._reset_chat()
+
+        def on_clear(btn):
+            try:
+                console.alert('ล้างแชทเก่าทั้งหมด?',
+                              'ลบประวัติแชททั้งหมดและเริ่มแชทใหม่', 'ล้าง')
+            except KeyboardInterrupt:  # กดยกเลิก
+                return
+            config.clear_chats()
+            self._reset_chat()
+            source.chats[:] = []
+            table.reload()
+
+        source = ChatListSource(chats, on_pick, on_delete)
+        table.data_source = source
+        table.delegate = source
+        table.right_button_items = [
+            ui.ButtonItem(title='ล้างทั้งหมด', action=on_clear)]
+        table.present('sheet')
+
+    def show_chat_viewer(self, chat_id):
+        chat = config.get_chat(chat_id)
+        if chat is None:
+            console.hud_alert('ไม่พบแชทนี้', 'error', 1.5)
+            return
+        viewer = ChatViewer(chat, lambda: self._continue_chat(chat, viewer))
+        viewer.present('sheet')
+
+    def _continue_chat(self, chat, viewer):
+        if self._busy_warning():
+            return
+        self._chat_id = chat['id']
+        self._turns = [t for t in chat['turns'] if isinstance(t, dict)]
+        self._live = None
+        viewer.close()
+        self.render()
 
     def ask_confirm(self, action):
         def on_ok():

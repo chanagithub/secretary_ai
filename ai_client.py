@@ -93,11 +93,12 @@ def _http_error_message(response):
     return msg
 
 
-def stream_chat(user_text, on_chunk, token, model=None):
+def stream_chat(user_text, on_chunk, token, model=None, history=None):
     """ส่งข้อความหนึ่งข้อความให้ AI แล้วรับคำตอบเป็นช่วง ๆ
 
     on_chunk(text) ถูกเรียกทุกครั้งที่ได้ข้อความใหม่ (เรียกจาก thread ที่เรียกฟังก์ชันนี้)
     คืนข้อความทั้งหมดที่ได้รับ ถ้าถูก cancel จะคืนเท่าที่ได้ก่อนหยุด
+    history = รายการ {'role': 'user'|'assistant', 'content': ...} ที่ให้ AI จำ (เรียงเก่าไปใหม่)
     ถ้ามีปัญหาจะ raise AIError
     """
     key = config.get_api_key()
@@ -108,10 +109,11 @@ def stream_chat(user_text, on_chunk, token, model=None):
     payload = {
         'model': model,
         'stream': True,
-        'messages': [
-            {'role': 'system', 'content': _system_prompt()},
-            {'role': 'user', 'content': user_text},
-        ],
+        'messages': (
+            [{'role': 'system', 'content': _system_prompt()}]
+            + list(history or [])
+            + [{'role': 'user', 'content': user_text}]
+        ),
     }
     headers = {
         'Authorization': 'Bearer ' + key,
