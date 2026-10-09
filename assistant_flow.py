@@ -17,7 +17,7 @@ import date_guard
 import reminders_tool
 import tools
 from overlays import ConfirmOverlay
-from debug_log import debug_log
+from debug_log import log as debug_log
 
 # ---------- 1) ความกำกวมของชื่อวัน ----------
 def find_ambiguous_weekday(text):
