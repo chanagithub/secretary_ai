@@ -61,6 +61,45 @@ def _create(calendar, title, notes, due_value, alarm_minutes_before):
     return r
 
 
+def _create_all_day(calendar, title, notes, day):
+    """สร้างการเตือนแบบ all-day (ไม่มีเวลา) ผ่าน EventKit ด้วย objc_util
+
+    Apple: dueDateComponents ที่ไม่มี hour/minute/second = all-day และต้องตั้ง calendar เป็น gregorian
+    iOS ต้องมี startDateComponents เมื่อมี due จึงตั้งทั้งสองเป็นวันเดียวกัน
+    """
+    from ctypes import c_void_p, byref
+    from objc_util import ObjCClass, ObjCInstance, ns
+
+    store = ObjCClass('EKEventStore').alloc().init()
+    ek_cal = store.calendarWithIdentifier_(ns(calendar.identifier))
+    if ek_cal is None:
+        raise RuntimeError('หาลิสต์ "%s" ใน EventKit ไม่เจอ' % AI_LIST_NAME)
+
+    gregorian = ObjCClass('NSCalendar').calendarWithIdentifier_(ns('gregorian'))
+
+    def components():
+        c = ObjCClass('NSDateComponents').alloc().init()
+        c.setCalendar_(gregorian)
+        c.setYear_(day.year)
+        c.setMonth_(day.month)
+        c.setDay_(day.day)
+        return c
+
+    rem = ObjCClass('EKReminder').reminderWithEventStore_(store)
+    rem.setTitle_(ns(title))
+    if notes:
+        rem.setNotes_(ns(notes))
+    rem.setCalendar_(ek_cal)
+    rem.setStartDateComponents_(components())
+    rem.setDueDateComponents_(components())
+
+    err = c_void_p()
+    ok = store.saveReminder_commit_error_(rem, True, byref(err))
+    if not ok:
+        reason = ObjCInstance(err).localizedDescription() if err.value else 'ไม่ทราบสาเหตุ'
+        raise RuntimeError('บันทึกไม่สำเร็จ: %s' % reason)
+
+
 def create_reminder(title, due_date=None, notes=None,
                      alarm_minutes_before=None, calendar=None, has_time=True):
     """
@@ -72,24 +111,21 @@ def create_reminder(title, due_date=None, notes=None,
     alarm_minutes_before: ตัวเลขนาที ถ้าใส่จะตั้งแจ้งเตือนล่วงหน้าก่อนถึง due_date
                            (ต้องมี due_date ด้วยถึงจะมีผล)
     calendar: ถ้าไม่ระบุ จะใช้ลิสต์ 'เลขา AI' โดยอัตโนมัติ
-    has_time: False = บันทึกเฉพาะวัน ไม่กำหนดเวลา (ลองส่งเป็น date ก่อน
-              ถ้าโมดูลไม่รับจะใช้ datetime เที่ยงคืนของวันนั้นแทน)
+    has_time: False = บันทึกเฉพาะวัน ไม่กำหนดเวลา (สวิตช์ "เวลา" ในแอป Reminders ปิด)
+              โมดูล reminders ของ Pythonista ทำแบบนี้ไม่ได้ (ส่งเป็น 00:00) จึงเขียนผ่าน EventKit
+              ตรง ๆ (ทดสอบบน iPhone แล้วด้วย test_allday.py) ถ้าไม่สำเร็จจะ raise ไม่ย้อนไปใช้ 00:00
 
-    คืนค่า: reminders.Reminder object ที่บันทึกแล้ว
+    คืนค่า: reminders.Reminder object ที่บันทึกแล้ว (แบบไม่ระบุเวลาคืน None)
     """
     if calendar is None:
         calendar = get_ai_calendar()
 
     if due_date and not has_time:
         day = due_date.date() if isinstance(due_date, datetime.datetime) else due_date
-        try:
-            r = _create(calendar, title, notes, day, None)
-            debug_log('reminders: saved date-only as date object')
-            return r
-        except Exception as e:
-            debug_log('reminders: date object rejected (%r) -> use midnight datetime' % e)
-        due_date = datetime.datetime(day.year, day.month, day.day)
-        alarm_minutes_before = None
+        debug_log('reminders: saving all-day via EventKit')
+        _create_all_day(calendar, title, notes, day)
+        debug_log('reminders: all-day saved')
+        return None
 
     return _create(calendar, title, notes, due_date, alarm_minutes_before)
 
