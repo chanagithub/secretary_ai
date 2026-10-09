@@ -335,14 +335,16 @@ class MainView(ui.View):
         """ตรวจค่า -> ป๊อปอัปยืนยัน -> บันทึก แล้วปิดรอบพร้อมผลลัพธ์"""
         self._live['ai'] = ai_text or '(รอคุณยืนยัน)'
         self.render()
-
+        base_text = ai_text.strip() if ai_text else ''
+        
         def on_done(lines, redo, saved):
             debug_log('ui: on_done start')
-            parts = ([ai_text.strip()] if ai_text.strip() else []) + lines
+            parts = ([base_text] if base_text else []) + lines
             self._finish_turn('\n'.join(parts), 'ok', tool=True)
+            debug_log('ui: on_done after _finish_turn')
             if saved or redo:
                 self.input.text = ''
-            if redo:  # ล้างช่องแล้วเริ่มใหม่
+            if redo:
                 ui.delay(self.input.begin_editing, 0.3)
             debug_log('ui: on_done end')
 
