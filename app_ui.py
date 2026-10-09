@@ -288,11 +288,11 @@ class MainView(ui.View):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_progress(self, token, text):
-        if token is not self._token or self._live is None:  # ถูกกดหยุดไปแล้ว
-            return
-        self._live['ai'] = text
-        self.render()
+        def _on_progress(self, token, text):
+            if token is not self._token or self._live is None:
+                return
+            self._live['ai'] = text
+            self.render()
 
         def _finish_turn(self, text, status, error=None, tool=False):
             debug_log('ui: _finish_turn start')
@@ -307,7 +307,7 @@ class MainView(ui.View):
             if self._chat_id is None:
                 self._chat_id = config.new_chat_id()
             self._turns.append(turn)
-            
+
             debug_log('ui: _finish_turn before append_turn')
             try:
                 config.append_turn(self._chat_id, turn)
@@ -315,9 +315,8 @@ class MainView(ui.View):
             except Exception as e:
                 debug_log('ui: _finish_turn append_turn error: %s' % e)
                 console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
-                
+
             debug_log('ui: _finish_turn before delayed render')
-            # หน่วงเวลาเรนเดอร์หน้าจอเล็กน้อย เพื่อให้ระบบเคลียร์ popup คราบสุดท้ายให้เสร็จก่อน
             ui.delay(self.render, 0.1)
             debug_log('ui: _finish_turn end')
 
@@ -343,15 +342,15 @@ class MainView(ui.View):
         base_text = ai_text.strip() if ai_text else ''
 
         def on_done(lines, redo, saved):
-            if self._is_active:  # ตรวจสอบว่าแอปยังไม่ถูกระงับ
-                self.input.text = ''  # เคลียร์ช่อง input
-                self._scroll_to_bottom()
             debug_log('ui: on_done start')
             parts = ([base_text] if base_text else []) + lines
             self._finish_turn('\n'.join(parts), 'ok', tool=True)
             debug_log('ui: on_done after _finish_turn')
-            if saved or redo:
+            try:
                 self.input.text = ''
+                self._scroll_to_bottom()
+            except Exception as e:
+                debug_log('ui: on_done input update error: %s' % e)
             if redo:
                 ui.delay(self.input.begin_editing, 0.3)
             debug_log('ui: on_done end')
