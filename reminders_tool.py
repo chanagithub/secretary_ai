@@ -74,3 +74,37 @@ def create_reminder(title, due_date=None, notes=None,
             r.alarms = [alarm]
     r.save()
     return r
+
+def _naive(d):
+    """ทำให้เป็นเวลาท้องถิ่นแบบไม่มี timezone (ถ้าระบบคืนมาพร้อม timezone)"""
+    if d.tzinfo is not None:
+        d = d.astimezone().replace(tzinfo=None)
+    return d
+
+
+def list_reminders_on(day):
+    """งานที่ยังไม่เสร็จของวัน 'day' (datetime.date) ในลิสต์ 'เลขา AI' เท่านั้น
+
+    คืนค่า: list ของ (due_date: datetime, reminder) เรียงตามเวลา
+    """
+    items = []
+    for r in reminders.get_reminders(calendar=get_ai_calendar(), completed=False):
+        if r.due_date is None:
+            continue
+        due = _naive(r.due_date)
+        if due.date() == day:
+            items.append((due, r))
+    items.sort(key=lambda x: x[0])
+    return items
+
+
+def mark_done(reminder):
+    """ติ๊กว่าเสร็จแล้ว (ยังเหลืออยู่ในแอป Reminders ในหมวดที่เสร็จแล้ว กู้คืนได้)"""
+    reminder.completed = True
+    reminder.save()
+
+
+def delete_reminder(reminder):
+    """ลบถาวร"""
+    if not reminders.delete_reminder(reminder):
+        raise RuntimeError('ลบรายการไม่สำเร็จ')

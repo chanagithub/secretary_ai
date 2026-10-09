@@ -44,7 +44,31 @@ CREATE_REMINDER_SCHEMA = {
     },
 }
 
-ALL_TOOLS = [CREATE_REMINDER_SCHEMA]
+LIST_REMINDERS_SCHEMA = {
+    'type': 'function',
+    'function': {
+        'name': 'list_reminders',
+        'description': (
+            'ดูรายการงาน/การเตือนที่ยังไม่เสร็จของวันที่ระบุ (เฉพาะที่เลขาสร้างไว้) '
+            'เรียกเมื่อผู้ใช้ถามว่าวันนี้/พรุ่งนี้/วันที่ใดมีงานหรือนัดอะไรบ้าง'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'date': {
+                    'type': 'string',
+                    'description': (
+                        'วันที่ที่ต้องการดู รูปแบบ YYYY-MM-DD '
+                        'ตีความจากปฏิทินใน system prompt เสมอ เช่น "พรุ่งนี้" ให้แปลงเป็นวันที่จริง'
+                    ),
+                },
+            },
+            'required': ['date'],
+        },
+    },
+}
+
+ALL_TOOLS = [CREATE_REMINDER_SCHEMA, LIST_REMINDERS_SCHEMA]
 
 
 class ToolValidationError(Exception):
@@ -114,3 +138,34 @@ def format_confirm_text(validated):
     if validated.get('notes'):
         text += '\nบันทึกเพิ่มเติม: %s' % validated['notes']
     return text
+
+_WEEKDAYS_TH = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์']
+_MONTHS_TH = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+              'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+
+
+def validate_list_reminders(arguments):
+    """ตรวจวันที่ที่ AI ส่งมาสำหรับ list_reminders คืน datetime.date
+
+    ถ้าไม่ผ่าน raise ToolValidationError
+    """
+    text = (arguments.get('date') or '').strip()
+    if not text:
+        raise ToolValidationError('AI ไม่ได้ระบุวันที่ที่ต้องการดู กรุณาบอกว่าจะดูงานของวันไหน')
+    try:
+        day = datetime.datetime.strptime(text[:10], '%Y-%m-%d').date()
+    except ValueError:
+        raise ToolValidationError(
+            'AI ส่งรูปแบบวันที่มาไม่ถูกต้อง (%s) กรุณาลองพูดใหม่อีกครั้ง' % text)
+    today = datetime.date.today()
+    if abs((day - today).days) > 730:
+        raise ToolValidationError(
+            'วันที่ที่ตีความได้ (%s) ห่างจากวันนี้ผิดปกติ กรุณาตรวจสอบอีกครั้ง'
+            % day.strftime('%d/%m/%Y'))
+    return day
+
+
+def format_day_text(day):
+    """วันที่ภาษาไทยสั้น ๆ เช่น 'ศุกร์ 9 ต.ค. 2026'"""
+    return '%s %d %s %d' % (_WEEKDAYS_TH[day.weekday()], day.day,
+                            _MONTHS_TH[day.month], day.year)
