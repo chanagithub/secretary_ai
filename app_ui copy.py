@@ -343,9 +343,6 @@ class MainView(ui.View):
         base_text = ai_text.strip() if ai_text else ''
 
         def on_done(lines, redo, saved):
-            if self._is_active:  # ตรวจสอบว่าแอปยังไม่ถูกระงับ
-                self.input.text = ''  # เคลียร์ช่อง input
-                self._scroll_to_bottom()
             debug_log('ui: on_done start')
             parts = ([base_text] if base_text else []) + lines
             self._finish_turn('\n'.join(parts), 'ok', tool=True)

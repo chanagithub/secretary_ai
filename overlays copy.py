@@ -68,9 +68,6 @@ class _Popup(ui.View):
         return action
 
     def _close(self):
-        if not hasattr(self, '_is_closing'):
-            self._is_closing = True
-            self.remove_from_superview()
         if self.superview:
             self.superview.remove_subview(self)
 
