@@ -353,7 +353,10 @@ class MainView(ui.View):
                 ui.delay(self.input.begin_editing, 0.3)
             debug_log('ui: on_done end')
 
-        assistant_flow.run_actions(self, actions, on_done)
+            
+        # หน่วงเวลาเปิด flow เล็กน้อย เพื่อให้ป๊อปอัปเดิมดีดตัวหลุดจากสแต็ก UIKit แบบสมบูรณ์ก่อน
+        ui.delay(lambda: assistant_flow.run_actions(self, actions, on_done), 0.2)
+
 
     def stop(self):
         token = self._token
