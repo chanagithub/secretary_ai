@@ -92,7 +92,14 @@ def run_actions(host, actions, on_done):
 
     def finish(redo=False):
         debug_log('flow: finish redo=%s saved=%s' % (redo, state['saved']))
-        on_done(lines, redo, state['saved'])
+        finished_lines = list(lines)
+        saved = state['saved']
+
+        def notify_done():
+            debug_log('flow: calling on_done (delayed)')
+            on_done(finished_lines, redo, saved)
+
+        ui.delay(notify_done, 0.2)
 
     def step():
         if not queue:
