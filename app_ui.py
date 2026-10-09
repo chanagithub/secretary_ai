@@ -35,6 +35,7 @@ class MainView(ui.View):
         self._pending_actions = None
         self._action_base_text = ''
         self._action_runner = None
+        self._keep_context = False  # True = รอบนี้ AI ถามเวลา ต้องจำไว้ให้รอบถัดไป
 
         self.model_btn = ui.Button()
         self.model_btn.font = ('<system>', 14)
@@ -363,7 +364,9 @@ class MainView(ui.View):
         if self._action_base_text:
             parts.append(self._action_base_text)
         parts.extend(str(line) for line in lines)
-        self._finish_turn('\n'.join(parts), 'ok', tool=True)
+        keep = self._keep_context
+        self._keep_context = False
+        self._finish_turn('\n'.join(parts), 'ok', tool=not keep)
         debug_log('ui: on_actions_done after _finish_turn')
         self._action_base_text = ''
         try:
@@ -371,7 +374,7 @@ class MainView(ui.View):
             self._scroll_to_bottom()
         except Exception as e:
             debug_log('ui: on_actions_done input update error: %r' % e)
-        if redo:
+        if redo or keep:
             ui.delay(self.input.begin_editing, 0.3)
         debug_log('ui: on_actions_done end saved=%s' % saved)
 

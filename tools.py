@@ -8,6 +8,7 @@
 """
 
 import datetime
+import re
 
 # ---- schema ที่ส่งให้ OpenRouter (รูปแบบ OpenAI function calling) ----
 
@@ -30,6 +31,7 @@ CREATE_REMINDER_SCHEMA = {
                     'type': 'string',
                     'description': (
                         'วันเวลาที่ต้องทำ รูปแบบ YYYY-MM-DD HH:MM (24 ชม.) '
+                        'ถ้าผู้ใช้ไม่ได้บอกเวลา ให้ใส่เฉพาะวัน YYYY-MM-DD (ห้ามเดาเวลา) '
                         'ตีความจากวันที่ปัจจุบันที่ให้ไว้ใน system prompt เสมอ '
                         'เช่น "พุธนี้บ่ายโมง" ให้คำนวณเป็นวันที่จริง ห้ามเดาปีเอง'
                     ),
@@ -79,7 +81,8 @@ def validate_create_reminder(arguments):
     """ตรวจค่าที่ AI ส่งมาสำหรับ create_reminder ก่อนนำไปสร้างจริง
 
     arguments: dict จาก AI ({'title':.., 'due_date':.., 'notes':..})
-    คืนค่า: dict ที่ตรวจแล้ว {'title':.., 'due_date': datetime, 'notes':..}
+    คืนค่า: dict ที่ตรวจแล้ว {'title':.., 'due_date': datetime, 'notes':.., 'has_time': bool}
+    due_date เป็น 'YYYY-MM-DD' (ไม่มีเวลา) ได้ -> has_time=False และ due_date เป็นเที่ยงคืนของวันนั้น
     ถ้าไม่ผ่าน raise ToolValidationError
     """
     title = (arguments.get('title') or '').strip()
@@ -90,15 +93,23 @@ def validate_create_reminder(arguments):
     due_date_str = (arguments.get('due_date') or '').strip()
     if not due_date_str:
         raise ToolValidationError(
-            'AI ไม่ได้ระบุวันเวลา กรุณาบอกวันและเวลาที่ต้องการให้เตือน')
+            'AI ไม่ได้ระบุวัน กรุณาบอกวันที่ต้องการให้เตือน')
 
     due_date = None
-    for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M:%S'):
+    has_time = True
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', due_date_str):  # มีแต่วัน ไม่มีเวลา
         try:
-            due_date = datetime.datetime.strptime(due_date_str, fmt)
-            break
+            due_date = datetime.datetime.strptime(due_date_str, '%Y-%m-%d')
+            has_time = False
         except ValueError:
-            continue
+            pass
+    if due_date is None:
+        for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M:%S'):
+            try:
+                due_date = datetime.datetime.strptime(due_date_str, fmt)
+                break
+            except ValueError:
+                continue
     if due_date is None:
         raise ToolValidationError(
             'AI ส่งรูปแบบวันเวลามาไม่ถูกต้อง (%s) กรุณาลองพูดใหม่อีกครั้ง'
@@ -107,11 +118,15 @@ def validate_create_reminder(arguments):
     now = datetime.datetime.now()
     # กันกรณี AI ตีความวันที่ผิดจนกลายเป็นอดีต
     # (เช่น "พุธนี้" เมื่อวันนี้เป็นพุธแล้ว แต่ AI ดันถอยไปสัปดาห์ก่อน)
-    if due_date < now - datetime.timedelta(minutes=5):
+    if has_time:
+        too_old = due_date < now - datetime.timedelta(minutes=5)
+    else:  # ไม่มีเวลา: วันนี้ยังใช้ได้ ผิดเฉพาะวันที่ผ่านไปแล้ว
+        too_old = due_date.date() < now.date()
+    if too_old:
         raise ToolValidationError(
             'วันเวลาที่ตีความได้ (%s) เป็นเวลาที่ผ่านมาแล้ว '
             'กรุณายืนยันวันที่อีกครั้ง หรือพูดให้ชัดเจนขึ้น'
-            % due_date.strftime('%a %d/%m/%Y %H:%M'))
+            % due_date.strftime('%a %d/%m/%Y %H:%M' if has_time else '%a %d/%m/%Y'))
 
     # กันกรณีตีความไกลผิดปกติ (เกิน 2 ปีข้างหน้า) น่าจะเป็นปีผิด
     if due_date > now + datetime.timedelta(days=730):
@@ -120,7 +135,8 @@ def validate_create_reminder(arguments):
             % due_date.strftime('%d/%m/%Y'))
 
     notes = (arguments.get('notes') or '').strip() or None
-    return {'title': title, 'due_date': due_date, 'notes': notes}
+    return {'title': title, 'due_date': due_date, 'notes': notes,
+            'has_time': has_time}
 
 
 def format_confirm_text(validated):
@@ -131,9 +147,12 @@ def format_confirm_text(validated):
     months_th = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
                  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
     d = validated['due_date']
-    date_text = '%s %d %s %d %02d:%02d' % (
-        weekdays_th[d.weekday()], d.day, months_th[d.month], d.year,
-        d.hour, d.minute)
+    date_text = '%s %d %s %d' % (
+        weekdays_th[d.weekday()], d.day, months_th[d.month], d.year)
+    if validated.get('has_time', True):
+        date_text += ' %02d:%02d' % (d.hour, d.minute)
+    else:
+        date_text += ' (ไม่ระบุเวลา)'
     text = 'จะสร้างการเตือน: "%s"\nกำหนด: %s' % (validated['title'], date_text)
     if validated.get('notes'):
         text += '\nบันทึกเพิ่มเติม: %s' % validated['notes']

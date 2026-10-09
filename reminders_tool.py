@@ -12,6 +12,7 @@
 
 import datetime
 import reminders
+from debug_log import log as debug_log
 
 AI_LIST_NAME = "เลขา AI"
 
@@ -45,8 +46,23 @@ def check_access():
         return False, str(e)
 
 
+def _create(calendar, title, notes, due_value, alarm_minutes_before):
+    r = reminders.Reminder(calendar)
+    r.title = title
+    if notes:
+        r.notes = notes
+    if due_value is not None:
+        r.due_date = due_value
+        if alarm_minutes_before is not None:
+            alarm_time = due_value - datetime.timedelta(minutes=alarm_minutes_before)
+            alarm = reminders.Alarm(alarm_time)
+            r.alarms = [alarm]
+    r.save()
+    return r
+
+
 def create_reminder(title, due_date=None, notes=None,
-                     alarm_minutes_before=None, calendar=None):
+                     alarm_minutes_before=None, calendar=None, has_time=True):
     """
     สร้างรีมายเดอร์ 1 รายการ แล้วบันทึกเข้าแอป Reminders จริง
 
@@ -56,24 +72,26 @@ def create_reminder(title, due_date=None, notes=None,
     alarm_minutes_before: ตัวเลขนาที ถ้าใส่จะตั้งแจ้งเตือนล่วงหน้าก่อนถึง due_date
                            (ต้องมี due_date ด้วยถึงจะมีผล)
     calendar: ถ้าไม่ระบุ จะใช้ลิสต์ 'เลขา AI' โดยอัตโนมัติ
+    has_time: False = บันทึกเฉพาะวัน ไม่กำหนดเวลา (ลองส่งเป็น date ก่อน
+              ถ้าโมดูลไม่รับจะใช้ datetime เที่ยงคืนของวันนั้นแทน)
 
     คืนค่า: reminders.Reminder object ที่บันทึกแล้ว
     """
     if calendar is None:
         calendar = get_ai_calendar()
 
-    r = reminders.Reminder(calendar)
-    r.title = title
-    if notes:
-        r.notes = notes
-    if due_date:
-        r.due_date = due_date
-        if alarm_minutes_before is not None:
-            alarm_time = due_date - datetime.timedelta(minutes=alarm_minutes_before)
-            alarm = reminders.Alarm(alarm_time)
-            r.alarms = [alarm]
-    r.save()
-    return r
+    if due_date and not has_time:
+        day = due_date.date() if isinstance(due_date, datetime.datetime) else due_date
+        try:
+            r = _create(calendar, title, notes, day, None)
+            debug_log('reminders: saved date-only as date object')
+            return r
+        except Exception as e:
+            debug_log('reminders: date object rejected (%r) -> use midnight datetime' % e)
+        due_date = datetime.datetime(day.year, day.month, day.day)
+        alarm_minutes_before = None
+
+    return _create(calendar, title, notes, due_date, alarm_minutes_before)
 
 def _naive(d):
     """ทำให้เป็นเวลาท้องถิ่นแบบไม่มี timezone (ถ้าระบบคืนมาพร้อม timezone)"""
