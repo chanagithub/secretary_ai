@@ -15,6 +15,7 @@ import ai_client
 import assistant_flow
 from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
 from overlays import ChoiceOverlay
+from debug_log import log as debug_log
 
 
 HINT_TEXT = 'พิมพ์ หรือกดไมค์บนคีย์บอร์ดเพื่อพูด แล้วกดส่ง'
@@ -174,15 +175,21 @@ class MainView(ui.View):
 
     # ---------- ส่งคำสั่ง + ยืนยัน ----------
     def render(self):
+        debug_log('ui: render start')
         turns = list(self._turns)
         if self._live is not None:
             turns.append(self._live)
         if not turns:
             self.output.text = HINT_TEXT
             return
+        debug_log('ui: render calling format_chat')
         self.output.text = format_chat(turns)
+        debug_log('ui: render set output.text done')
         self._scroll_to_bottom()
+        debug_log('ui: render after _scroll_to_bottom')
         ui.delay(self._scroll_to_bottom, 0.05)
+        debug_log('ui: render end')
+        
 
     def _scroll_to_bottom(self):
         try:
@@ -289,6 +296,7 @@ class MainView(ui.View):
 
     def _finish_turn(self, text, status, error=None, tool=False):
         """ปิดรอบที่กำลังรอ แล้วบันทึกลงแชทและไฟล์ (tool=True: รอบนี้มีการเรียกเครื่องมือ)"""
+        debug_log('ui: _finish_turn start')
         turn = self._live
         self._live = None
         turn['ai'] = text
@@ -300,11 +308,14 @@ class MainView(ui.View):
         if self._chat_id is None:
             self._chat_id = config.new_chat_id()
         self._turns.append(turn)
+        debug_log('ui: _finish_turn before append_turn')
         try:
             config.append_turn(self._chat_id, turn)
         except OSError:
             console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
+        debug_log('ui: _finish_turn before render')
         self.render()
+        debug_log('ui: _finish_turn after render')
 
     def _on_done(self, token, text, calls, error):
         if token is not self._token:  # ถูกกดหยุดไปแล้ว
@@ -326,12 +337,14 @@ class MainView(ui.View):
         self.render()
 
         def on_done(lines, redo, saved):
+            debug_log('ui: on_done start')
             parts = ([ai_text.strip()] if ai_text.strip() else []) + lines
             self._finish_turn('\n'.join(parts), 'ok', tool=True)
             if saved or redo:
                 self.input.text = ''
             if redo:  # ล้างช่องแล้วเริ่มใหม่
                 ui.delay(self.input.begin_editing, 0.3)
+            debug_log('ui: on_done end')
 
         assistant_flow.run_actions(self, actions, on_done)
 
