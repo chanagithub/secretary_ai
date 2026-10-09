@@ -345,10 +345,16 @@ class MainView(ui.View):
             debug_log('ui: on_done start')
             try:
                 debug_log('ui: on_done before parts')
-                parts = ([base_text] if base_text else []) + lines
+                turn_text = base_text or ''
+                debug_log('ui: on_done base text ready')
+
+                for line in lines:
+                    debug_log('ui: on_done adding line')
+                    if turn_text:
+                        turn_text += '\n'
+                    turn_text += str(line)
+
                 debug_log('ui: on_done parts ready')
-                turn_text = '\n'.join(parts)
-                debug_log('ui: on_done before _finish_turn')
                 self._finish_turn(turn_text, 'ok', tool=True)
                 debug_log('ui: on_done after _finish_turn')
             except Exception as e:
