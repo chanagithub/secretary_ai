@@ -77,87 +77,102 @@ def _save(validated):
         notes=validated['notes'])
     debug_log('flow: _save done')
 
-def run_actions(host, actions, on_done):
-    """ไล่ทำทีละรายการ แต่ละรายการที่ต้องยืนยันจะขึ้นป๊อปอัปปุ่มกด
-    host = view ที่มี show_overlay(overlay)
-    on_done(lines, redo, saved) เรียกเมื่อจบทั้งหมด
-    lines = ข้อความผลลัพธ์แต่ละรายการ, redo = ผู้ใช้กด "ทำรายการใหม่"
-(ข้ามรายการที่เหลือ),
-    saved = มีการบันทึกลง Reminders สำเร็จอย่างน้อยหนึ่งรายการ
-    """
-    debug_log('flow: run_actions start, %d action(s)' % len(actions))
-    queue = list(actions)
-    lines = []
-    state = {'saved': False}
+class _ActionRunner:
+    """เก็บ state ของงานและส่ง bound methods ให้ ui.delay/ปุ่ม"""
 
-    def finish(redo=False):
-        debug_log('flow: finish redo=%s saved=%s' % (redo, state['saved']))
-        finished_lines = list(lines)
-        saved = state['saved']
+    def __init__(self, host, actions, on_done):
+        self.host = host
+        self.queue = list(actions)
+        self.lines = []
+        self.saved = False
+        self.on_done = on_done
+        self.finished = False
 
-        def notify_done():
-            debug_log('flow: calling on_done (delayed)')
-            on_done(finished_lines, redo, saved)
+    def start(self):
+        debug_log('flow: run_actions start, %d action(s)' % len(self.queue))
+        self.step()
 
-        ui.delay(notify_done, 0.2)
-
-    def step():
-        if not queue:
-            debug_log('flow: step - queue empty, calling finish')
-            finish()
+    def finish(self, redo=False):
+        if self.finished:
             return
-        action = queue.pop(0)
+        self.finished = True
+        debug_log('flow: finish redo=%s saved=%s' % (redo, self.saved))
+        if getattr(self.host, '_action_runner', None) is self:
+            self.host._action_runner = None
+        self.on_done(list(self.lines), redo, self.saved)
+
+    def step(self):
+        if self.finished:
+            return
+        if not self.queue:
+            debug_log('flow: step - queue empty, calling finish')
+            self.finish()
+            return
+
+        action = self.queue.pop(0)
         if action['kind'] == 'note':
-            lines.append(action['text'])
-            step()
+            self.lines.append(action['text'])
+            self.step()
             return
 
         validated = action['validated']
-
-        def on_ok():
-            debug_log('flow: on_ok button pressed')
-
-            def do_ok():
-                debug_log('flow: do_ok running (after delay)')
-                try:
-                    _save(validated)
-                except Exception as e:
-                    debug_log('flow: save failed: %s' % e)
-                    lines.append('บันทึกไม่สำเร็จ: %s' % e)
-                else:
-                    state['saved'] = True
-                    lines.append('บันทึกการเตือนแล้ว: "%s" (ดูในแอป Reminders '
-                                  'ลิสต์ "เลขา AI")' % validated['title'])
-                debug_log('flow: do_ok calling step()')
-                step()
-
-            ui.delay(do_ok, 0.3)
-
-        def on_cancel():
-            debug_log('flow: on_cancel button pressed')
-
-            def do_cancel():
-                debug_log('flow: do_cancel running (after delay)')
-                lines.append('ยกเลิก ไม่บันทึก: "%s"' % validated['title'])
-                debug_log('flow: do_cancel calling step()')
-                step()
-
-            ui.delay(do_cancel, 0.3)
-
-        def on_redo():
-            debug_log('flow: on_redo button pressed')
-
-            def do_redo():
-                debug_log('flow: do_redo running (after delay)')
-                lines.append('ยกเลิก ไม่บันทึก: "%s" (ขอทำรายการใหม่)'
-                              % validated['title'])
-                debug_log('flow: do_redo calling finish(redo=True)')
-                finish(redo=True)
-
-            ui.delay(do_redo, 0.3)
-
+        self.current_validated = validated
         debug_log('flow: showing ConfirmOverlay title=%s' % validated.get('title'))
-        host.show_overlay(ConfirmOverlay(
-            'บันทึกการเตือนนี้ไหม?', action['body'], on_ok, on_cancel, on_redo))
+        self.host.show_overlay(ConfirmOverlay(
+            'บันทึกการเตือนนี้ไหม?', action['body'],
+            self.on_ok, self.on_cancel, self.on_redo))
 
-    step()
+    def on_ok(self):
+        debug_log('flow: on_ok button pressed')
+        ui.delay(self.do_ok, 0.3)
+
+    def do_ok(self):
+        if self.finished:
+            return
+        debug_log('flow: do_ok running (after delay)')
+        # validated action is the item immediately before the next queue item;
+        # keep it on the runner when the confirmation is shown.
+        validated = self.current_validated
+        try:
+            _save(validated)
+        except Exception as e:
+            debug_log('flow: save failed: %s' % e)
+            self.lines.append('บันทึกไม่สำเร็จ: %s' % e)
+        else:
+            self.saved = True
+            self.lines.append('บันทึกการเตือนแล้ว: "%s" (ดูในแอป Reminders ลิสต์ "เลขา AI")'
+                              % validated['title'])
+        debug_log('flow: do_ok calling step()')
+        self.step()
+
+    def on_cancel(self):
+        debug_log('flow: on_cancel button pressed')
+        ui.delay(self.do_cancel, 0.3)
+
+    def do_cancel(self):
+        if self.finished:
+            return
+        debug_log('flow: do_cancel running (after delay)')
+        self.lines.append('ยกเลิก ไม่บันทึก: "%s"' % self.current_validated['title'])
+        debug_log('flow: do_cancel calling step()')
+        self.step()
+
+    def on_redo(self):
+        debug_log('flow: on_redo button pressed')
+        ui.delay(self.do_redo, 0.3)
+
+    def do_redo(self):
+        if self.finished:
+            return
+        debug_log('flow: do_redo running (after delay)')
+        self.lines.append('ยกเลิก ไม่บันทึก: "%s" (ขอทำรายการใหม่)'
+                          % self.current_validated['title'])
+        debug_log('flow: do_redo calling finish(redo=True)')
+        self.finish(redo=True)
+
+
+def run_actions(host, actions, on_done):
+    """รัน actions โดยเก็บ callback/state ไว้ใน object ที่อยู่ได้นานพอ"""
+    runner = _ActionRunner(host, actions, on_done)
+    host._action_runner = runner
+    runner.start()

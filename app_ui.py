@@ -31,6 +31,10 @@ class MainView(ui.View):
         self._chat_id = None  # แชทที่เปิดอยู่ (None = ยังไม่มีข้อความแรก)
         self._turns = []      # รอบถามตอบของแชทที่เปิดอยู่
         self._live = None     # รอบที่กำลังรอ AI ตอบ
+        self._pending_worker_result = None
+        self._pending_actions = None
+        self._action_base_text = ''
+        self._action_runner = None
 
         self.model_btn = ui.Button()
         self.model_btn.font = ('<system>', 14)
@@ -187,7 +191,6 @@ class MainView(ui.View):
         debug_log('ui: render set output.text done')
         self._scroll_to_bottom()
         debug_log('ui: render after _scroll_to_bottom')
-        ui.delay(self._scroll_to_bottom, 0.05)
         debug_log('ui: render end')
         
 
@@ -269,9 +272,8 @@ class MainView(ui.View):
         received = []
 
         def on_chunk(piece):
+            # รับชิ้นข้อความไว้ก่อน แล้วแสดงผลครั้งเดียวเมื่อคำตอบจบ
             received.append(piece)
-            snapshot = ''.join(received)
-            ui.delay(lambda: self._on_progress(token, snapshot), 0)
 
         def worker():
             error = None
@@ -284,9 +286,16 @@ class MainView(ui.View):
             except Exception as e:
                 error = 'เกิดข้อผิดพลาดที่ไม่คาดคิด: %s' % e
             final = ''.join(received)
-            ui.delay(lambda: self._on_done(token, final, calls, error), 0)
+            self._pending_worker_result = (token, final, calls, error)
+            ui.delay(self._deliver_worker_result, 0)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _deliver_worker_result(self):
+        result = self._pending_worker_result
+        self._pending_worker_result = None
+        if result is not None:
+            self._on_done(*result)
 
     def _on_progress(self, token, text):
         if token is not self._token or self._live is None:
@@ -336,44 +345,35 @@ class MainView(ui.View):
         self._run_actions(text, assistant_flow.prepare_actions(calls))
 
     def _run_actions(self, ai_text, actions):
-        """ตรวจค่า -> ป๊อปอัปยืนยัน -> บันทึก แล้วปิดรอบพร้อมผลลัพธ์"""
+        """เริ่มลำดับยืนยัน/บันทึก โดยใช้เมธอดของ MainView เป็น callback"""
+        self._action_base_text = ai_text.strip() if ai_text else ''
         self._live['ai'] = ai_text or '(รอคุณยืนยัน)'
         self.render()
-        base_text = ai_text.strip() if ai_text else ''
+        self._pending_actions = list(actions)
+        ui.delay(self._start_action_flow, 0.2)
 
-        def on_done(lines, redo, saved):
-            debug_log('ui: on_done start')
-            try:
-                debug_log('ui: on_done before parts')
-                turn_text = base_text or ''
-                debug_log('ui: on_done base text ready')
+    def _start_action_flow(self):
+        actions = self._pending_actions or []
+        self._pending_actions = None
+        assistant_flow.run_actions(self, actions, self._on_actions_done)
 
-                for line in lines:
-                    debug_log('ui: on_done adding line')
-                    if turn_text:
-                        turn_text += '\n'
-                    turn_text += str(line)
-
-                debug_log('ui: on_done parts ready')
-                self._finish_turn(turn_text, 'ok', tool=True)
-                debug_log('ui: on_done after _finish_turn')
-            except Exception as e:
-                debug_log('ui: on_done exception: %r' % e)
-                return
-
-            try:
-                self.input.text = ''
-                self._scroll_to_bottom()
-            except Exception as e:
-                debug_log('ui: on_done input update error: %r' % e)
-
-            if redo:
-                ui.delay(self.input.begin_editing, 0.3)
-            debug_log('ui: on_done end')
-
-            
-        # หน่วงเวลาเปิด flow เล็กน้อย เพื่อให้ป๊อปอัปเดิมดีดตัวหลุดจากสแต็ก UIKit แบบสมบูรณ์ก่อน
-        ui.delay(lambda: assistant_flow.run_actions(self, actions, on_done), 0.2)
+    def _on_actions_done(self, lines, redo, saved):
+        debug_log('ui: on_actions_done start')
+        parts = []
+        if self._action_base_text:
+            parts.append(self._action_base_text)
+        parts.extend(str(line) for line in lines)
+        self._finish_turn('\n'.join(parts), 'ok', tool=True)
+        debug_log('ui: on_actions_done after _finish_turn')
+        self._action_base_text = ''
+        try:
+            self.input.text = ''
+            self._scroll_to_bottom()
+        except Exception as e:
+            debug_log('ui: on_actions_done input update error: %r' % e)
+        if redo:
+            ui.delay(self.input.begin_editing, 0.3)
+        debug_log('ui: on_actions_done end saved=%s' % saved)
 
 
     def stop(self):
