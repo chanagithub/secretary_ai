@@ -1,9 +1,9 @@
-"""app_ui.py - หน้าจอหลักของ AI เลขาส่วนตัว (เฟส 0: UI)
+"""app_ui.py - หน้าจอหลักของ AI เลขาส่วนตัว (UI + เชื่อมเฟส 1 เตือนความจำ)
 
 ตั้งชื่อ app_ui แทน ui เพราะชื่อ ui จะไปบังโมดูล ui ของ Pythonista
-ต่อ AI จริงผ่าน ai_client (ตอนนี้ AI ตอบเป็นข้อความอย่างเดียว ยังไม่มีเครื่องมือ)
-รันไฟล์นี้ใน Pythonista (ต้องมี config.py, ai_client.py, chat_views.py, overlays.py
-อยู่โฟลเดอร์เดียวกัน)
+ลำดับงานกับ AI (เลือกวัน, tool calling, ยืนยัน, บันทึก) อยู่ใน assistant_flow.py
+รันไฟล์นี้ใน Pythonista (ต้องมี config.py, ai_client.py, chat_views.py, overlays.py,
+assistant_flow.py, tools.py, date_guard.py, reminders_tool.py อยู่โฟลเดอร์เดียวกัน)
 """
 import threading
 
@@ -12,8 +12,9 @@ import dialogs
 import console
 import config
 import ai_client
+import assistant_flow
 from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
-from overlays import ConfirmOverlay
+from overlays import ChoiceOverlay
 
 
 HINT_TEXT = 'พิมพ์ หรือกดไมค์บนคีย์บอร์ดเพื่อพูด แล้วกดส่ง'
@@ -172,9 +173,6 @@ class MainView(ui.View):
         table.present('sheet')
 
     # ---------- ส่งคำสั่ง + ยืนยัน ----------
-    def show_output(self, text):
-        self.output.text = text
-
     def render(self):
         turns = list(self._turns)
         if self._live is not None:
@@ -198,7 +196,7 @@ class MainView(ui.View):
         if self._token is not None:
             self.stop()
             return
-        if self._overlay is not None and self._overlay.superview:
+        if self._popup_open():
             return
         text = self.input.text.strip()
         if not text:
@@ -206,7 +204,7 @@ class MainView(ui.View):
             return
         self.input.end_editing()
         config.add_history(text)
-        self.start_request(text)
+        self.begin_request(text)
 
     def _set_busy(self, busy):
         if busy:
@@ -217,22 +215,48 @@ class MainView(ui.View):
             self.send_btn.background_color = '#007aff'
 
     def _memory_messages(self):
-        """ข้อความที่ให้ AI จำ: MEMORY_PAIRS คู่ล่าสุดที่สำเร็จ (ไม่รวมรอบที่หยุด/ผิดพลาด)"""
-        done = [t for t in self._turns
-                if t.get('status') == 'ok' and (t.get('ai') or '').strip()]
+        """ข้อความที่ให้ AI จำ: MEMORY_PAIRS คู่ล่าสุดที่สำเร็จ (ไม่รวมรอบที่หยุด/ผิดพลาด)
+
+        นับเฉพาะรอบหลังรอบล่าสุดที่มีการเรียกเครื่องมือ (turn['tool']) เหมือนตอนทดสอบ
+        ใช้ข้อความที่ส่งให้ AI จริง (turn['sent'], มีวันที่ที่ผู้ใช้เลือกต่อท้าย) ถ้ามี
+        """
+        done = []
+        for t in reversed(self._turns):
+            if t.get('tool'):
+                break
+            if t.get('status') == 'ok' and (t.get('ai') or '').strip():
+                done.append(t)
+        done.reverse()
         messages = []
         for t in done[-config.MEMORY_PAIRS:]:
-            messages.append({'role': 'user', 'content': t.get('user', '')})
+            messages.append({'role': 'user',
+                             'content': t.get('sent') or t.get('user', '')})
             messages.append({'role': 'assistant', 'content': t['ai']})
         return messages
 
-    def start_request(self, text):
+    def begin_request(self, text):
+        """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
+        info = assistant_flow.find_ambiguous_weekday(text)
+        if not info:
+            self.start_request(text, text)
+            return
+        title, options = assistant_flow.weekday_choice(info)
+
+        def on_pick(choice):
+            self.start_request(text, assistant_flow.apply_choice(text, info, choice))
+
+        overlay = ChoiceOverlay(title, options, on_pick, lambda: None)
+        self.show_overlay(overlay)
+
+    def start_request(self, text, sent_text):
         token = ai_client.CancelToken()
         self._token = token
         model = config.get_current_model()
         history = self._memory_messages()  # เก็บก่อนเพิ่มข้อความใหม่
         self._live = {'time': config.now_text(), 'model': model,
                       'user': text, 'ai': '', 'status': 'live'}
+        if sent_text != text:
+            self._live['sent'] = sent_text
         self._set_busy(True)
         self.render()
         received = []
@@ -244,14 +268,16 @@ class MainView(ui.View):
 
         def worker():
             error = None
+            calls = []
             try:
-                ai_client.stream_chat(text, on_chunk, token, model, history)
+                _, calls = assistant_flow.ask_ai(
+                    sent_text, on_chunk, token, model, history)
             except ai_client.AIError as e:
                 error = str(e)
             except Exception as e:
                 error = 'เกิดข้อผิดพลาดที่ไม่คาดคิด: %s' % e
             final = ''.join(received)
-            ui.delay(lambda: self._on_done(token, final, error), 0)
+            ui.delay(lambda: self._on_done(token, final, calls, error), 0)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -261,14 +287,16 @@ class MainView(ui.View):
         self._live['ai'] = text
         self.render()
 
-    def _finish_turn(self, text, status, error=None):
-        """ปิดรอบที่กำลังรอ แล้วบันทึกลงแชทและไฟล์"""
+    def _finish_turn(self, text, status, error=None, tool=False):
+        """ปิดรอบที่กำลังรอ แล้วบันทึกลงแชทและไฟล์ (tool=True: รอบนี้มีการเรียกเครื่องมือ)"""
         turn = self._live
         self._live = None
         turn['ai'] = text
         turn['status'] = status
         if error:
             turn['error'] = error
+        if tool:
+            turn['tool'] = True
         if self._chat_id is None:
             self._chat_id = config.new_chat_id()
         self._turns.append(turn)
@@ -278,7 +306,7 @@ class MainView(ui.View):
             console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
         self.render()
 
-    def _on_done(self, token, text, error):
+    def _on_done(self, token, text, calls, error):
         if token is not self._token:  # ถูกกดหยุดไปแล้ว
             return
         self._token = None
@@ -286,8 +314,26 @@ class MainView(ui.View):
         if error:
             self._finish_turn(text, 'error', error)
             return
-        self._finish_turn(text, 'ok')
-        self.input.text = ''
+        if not calls:  # AI ตอบเป็นข้อความ (หรือถามกลับ)
+            self._finish_turn(text, 'ok')
+            self.input.text = ''
+            return
+        self._run_actions(text, assistant_flow.prepare_actions(calls))
+
+    def _run_actions(self, ai_text, actions):
+        """ตรวจค่า -> ป๊อปอัปยืนยัน -> บันทึก แล้วปิดรอบพร้อมผลลัพธ์"""
+        self._live['ai'] = ai_text or '(รอคุณยืนยัน)'
+        self.render()
+
+        def on_done(lines, redo, saved):
+            parts = ([ai_text.strip()] if ai_text.strip() else []) + lines
+            self._finish_turn('\n'.join(parts), 'ok', tool=True)
+            if saved or redo:
+                self.input.text = ''
+            if redo:  # ล้างช่องแล้วเริ่มใหม่
+                ui.delay(self.input.begin_editing, 0.3)
+
+        assistant_flow.run_actions(self, actions, on_done)
 
     def stop(self):
         token = self._token
@@ -301,7 +347,7 @@ class MainView(ui.View):
 
     # ---------- เริ่มใหม่ / แชทเก่า ----------
     def _busy_warning(self):
-        if self._token is not None:
+        if self._token is not None or self._popup_open():
             console.hud_alert('รอ AI ตอบหรือกดหยุดก่อน', 'error', 1.5)
             return True
         return False
@@ -383,18 +429,13 @@ class MainView(ui.View):
         viewer.close()
         self.render()
 
-    def ask_confirm(self, action):
-        def on_ok():
-            self.show_output('ยืนยันแล้ว (จำลอง ยังไม่ได้บันทึกจริง)\n\n'
-                             + '\n'.join('%s: %s' % (k, v)
-                                         for k, v in action['lines']))
-            self.input.text = ''
+    # ---------- ป๊อปอัป ----------
+    def _popup_open(self):
+        return self._overlay is not None and self._overlay.superview is not None
 
-        def on_cancel():
-            self.show_output('ยกเลิกแล้ว')
-
-        overlay = ConfirmOverlay(action['title'], action['lines'],
-                                 on_ok, on_cancel)
+    def show_overlay(self, overlay):
+        """แสดงป๊อปอัปทับหน้าจอ (assistant_flow เรียกใช้)"""
+        self.input.end_editing()
         overlay.frame = self.bounds
         self._overlay = overlay
         self.add_subview(overlay)
