@@ -288,37 +288,37 @@ class MainView(ui.View):
 
         threading.Thread(target=worker, daemon=True).start()
 
-        def _on_progress(self, token, text):
-            if token is not self._token or self._live is None:
-                return
-            self._live['ai'] = text
-            self.render()
+    def _on_progress(self, token, text):
+        if token is not self._token or self._live is None:
+            return
+        self._live['ai'] = text
+        self.render()
 
-        def _finish_turn(self, text, status, error=None, tool=False):
-            debug_log('ui: _finish_turn start')
-            turn = self._live
-            self._live = None
-            turn['ai'] = text
-            turn['status'] = status
-            if error:
-                turn['error'] = error
-            if tool:
-                turn['tool'] = True
-            if self._chat_id is None:
-                self._chat_id = config.new_chat_id()
-            self._turns.append(turn)
+    def _finish_turn(self, text, status, error=None, tool=False):
+        debug_log('ui: _finish_turn start')
+        turn = self._live
+        self._live = None
+        turn['ai'] = text
+        turn['status'] = status
+        if error:
+            turn['error'] = error
+        if tool:
+            turn['tool'] = True
+        if self._chat_id is None:
+            self._chat_id = config.new_chat_id()
+        self._turns.append(turn)
 
-            debug_log('ui: _finish_turn before append_turn')
-            try:
-                config.append_turn(self._chat_id, turn)
-                debug_log('ui: _finish_turn append_turn success')
-            except Exception as e:
-                debug_log('ui: _finish_turn append_turn error: %s' % e)
-                console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
+        debug_log('ui: _finish_turn before append_turn')
+        try:
+            config.append_turn(self._chat_id, turn)
+            debug_log('ui: _finish_turn append_turn success')
+        except Exception as e:
+            debug_log('ui: _finish_turn append_turn error: %s' % e)
+            console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
 
-            debug_log('ui: _finish_turn before delayed render')
-            ui.delay(self.render, 0.1)
-            debug_log('ui: _finish_turn end')
+        debug_log('ui: _finish_turn before delayed render')
+        ui.delay(self.render, 0.1)
+        debug_log('ui: _finish_turn end')
 
 
     def _on_done(self, token, text, calls, error):
