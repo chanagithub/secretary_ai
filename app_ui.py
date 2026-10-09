@@ -343,14 +343,24 @@ class MainView(ui.View):
 
         def on_done(lines, redo, saved):
             debug_log('ui: on_done start')
-            parts = ([base_text] if base_text else []) + lines
-            self._finish_turn('\n'.join(parts), 'ok', tool=True)
-            debug_log('ui: on_done after _finish_turn')
+            try:
+                debug_log('ui: on_done before parts')
+                parts = ([base_text] if base_text else []) + lines
+                debug_log('ui: on_done parts ready')
+                turn_text = '\n'.join(parts)
+                debug_log('ui: on_done before _finish_turn')
+                self._finish_turn(turn_text, 'ok', tool=True)
+                debug_log('ui: on_done after _finish_turn')
+            except Exception as e:
+                debug_log('ui: on_done exception: %r' % e)
+                return
+
             try:
                 self.input.text = ''
                 self._scroll_to_bottom()
             except Exception as e:
-                debug_log('ui: on_done input update error: %s' % e)
+                debug_log('ui: on_done input update error: %r' % e)
+
             if redo:
                 ui.delay(self.input.begin_editing, 0.3)
             debug_log('ui: on_done end')
