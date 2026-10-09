@@ -294,28 +294,33 @@ class MainView(ui.View):
         self._live['ai'] = text
         self.render()
 
-    def _finish_turn(self, text, status, error=None, tool=False):
-        """ปิดรอบที่กำลังรอ แล้วบันทึกลงแชทและไฟล์ (tool=True: รอบนี้มีการเรียกเครื่องมือ)"""
-        debug_log('ui: _finish_turn start')
-        turn = self._live
-        self._live = None
-        turn['ai'] = text
-        turn['status'] = status
-        if error:
-            turn['error'] = error
-        if tool:
-            turn['tool'] = True
-        if self._chat_id is None:
-            self._chat_id = config.new_chat_id()
-        self._turns.append(turn)
-        debug_log('ui: _finish_turn before append_turn')
-        try:
-            config.append_turn(self._chat_id, turn)
-        except OSError:
-            console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
-        debug_log('ui: _finish_turn before render')
-        self.render()
-        debug_log('ui: _finish_turn after render')
+        def _finish_turn(self, text, status, error=None, tool=False):
+            debug_log('ui: _finish_turn start')
+            turn = self._live
+            self._live = None
+            turn['ai'] = text
+            turn['status'] = status
+            if error:
+                turn['error'] = error
+            if tool:
+                turn['tool'] = True
+            if self._chat_id is None:
+                self._chat_id = config.new_chat_id()
+            self._turns.append(turn)
+            
+            debug_log('ui: _finish_turn before append_turn')
+            try:
+                config.append_turn(self._chat_id, turn)
+                debug_log('ui: _finish_turn append_turn success')
+            except Exception as e:
+                debug_log('ui: _finish_turn append_turn error: %s' % e)
+                console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
+                
+            debug_log('ui: _finish_turn before delayed render')
+            # หน่วงเวลาเรนเดอร์หน้าจอเล็กน้อย เพื่อให้ระบบเคลียร์ popup คราบสุดท้ายให้เสร็จก่อน
+            ui.delay(self.render, 0.1)
+            debug_log('ui: _finish_turn end')
+
 
     def _on_done(self, token, text, calls, error):
         if token is not self._token:  # ถูกกดหยุดไปแล้ว
@@ -336,7 +341,7 @@ class MainView(ui.View):
         self._live['ai'] = ai_text or '(รอคุณยืนยัน)'
         self.render()
         base_text = ai_text.strip() if ai_text else ''
-        
+
         def on_done(lines, redo, saved):
             debug_log('ui: on_done start')
             parts = ([base_text] if base_text else []) + lines
