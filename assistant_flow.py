@@ -279,6 +279,12 @@ def _local_wake_alarm_action(text):
         return None
 
     normalized = text.translate(str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789'))
+    number_words = {'หนึ่ง': 1, 'เอ็ด': 1, 'สอง': 2, 'สาม': 3, 'สี่': 4,
+                    'ห้า': 5, 'หก': 6, 'เจ็ด': 7, 'แปด': 8, 'เก้า': 9, 'สิบ': 10}
+
+    def number_value(value):
+        return int(value) if value.isdigit() else number_words.get(value)
+
     hour = minute = None
     match = re.search(r'(?<!\d)(\d{1,2})\s*[:.]\s*(\d{2})(?!\d)', normalized)
     if match:
@@ -290,20 +296,23 @@ def _local_wake_alarm_action(text):
     elif 'เที่ยง' in normalized:
         hour, minute = 12, 0
     else:
-        match = re.search(r'ตี\s*(\d{1,2})', normalized)
+        word_pattern = '|'.join(sorted(number_words, key=len, reverse=True))
+        match = re.search(r'ตี\s*(\d{1,2}|%s)' % word_pattern, normalized)
         if match:
-            hour, minute = int(match.group(1)), 0
+            hour, minute = number_value(match.group(1)), 0
+            if hour is None or not 1 <= hour <= 6:
+                return {'kind': 'note', 'text': 'เวลาตีต้องอยู่ระหว่างตี 1 ถึงตี 6 ครับ'}
         else:
-            match = re.search(r'(\d{1,2})\s*ทุ่ม', normalized)
+            match = re.search(r'(\d{1,2}|%s)\s*ทุ่ม' % word_pattern, normalized)
             if match:
-                n = int(match.group(1))
+                n = number_value(match.group(1))
                 if not 1 <= n <= 5:
                     return {'kind': 'note', 'text': 'เวลาไม่ถูกต้องครับ กรุณาบอกเวลาอีกครั้ง'}
                 hour, minute = 18 + n, 0
             else:
-                match = re.search(r'(?:บ่าย\s*)?(\d{1,2})\s*โมง\s*(เช้า|สาย|บ่าย|เย็น|ค่ำ|กลางคืน)?', normalized)
+                match = re.search(r'(?:บ่าย\s*)?(\d{1,2}|%s)\s*โมง\s*(เช้า|สาย|บ่าย|เย็น|ค่ำ|กลางคืน)?' % word_pattern, normalized)
                 if match:
-                    n = int(match.group(1))
+                    n = number_value(match.group(1))
                     part = match.group(2)
                     if part == 'บ่าย':
                         # เผื่อรูปแบบ "บ่าย 2 โมง"
@@ -321,6 +330,17 @@ def _local_wake_alarm_action(text):
                     if not 0 <= hour <= 23:
                         return {'kind': 'note', 'text': 'เวลาไม่ถูกต้องครับ กรุณาบอกเวลาอีกครั้ง'}
                     minute = 0
+                else:
+                    # รองรับภาษาพูดที่ละคำว่า "โมง" เช่น "หกโมงเช้า" และ "เจ็ดโมงเช้า"
+                    match = re.search(r'(%s)\s*(เช้า|สาย|เย็น|ค่ำ|กลางคืน)' % word_pattern, normalized)
+                    if match:
+                        n = number_value(match.group(1))
+                        part = match.group(2)
+                        if part in ('เช้า', 'สาย'):
+                            hour = n
+                        else:
+                            hour = n if n >= 6 else n + 12
+                        minute = 0
 
     if hour is None:
         return {'kind': 'note', 'text': 'จะให้ปลุกกี่โมงครับ'}
@@ -340,7 +360,18 @@ def _local_wake_alarm_action(text):
             except ValueError:
                 return {'kind': 'note', 'text': 'วันที่ไม่ถูกต้องครับ กรุณาบอกวันอีกครั้ง'}
         else:
-            return {'kind': 'note', 'text': 'จะให้ปลุกวันไหนครับ เช่น พรุ่งนี้'}
+            weekday_names = {'จันทร์': 0, 'อังคาร': 1, 'พุธ': 2, 'พฤหัส': 3,
+                             'ศุกร์': 4, 'เสาร์': 5, 'อาทิตย์': 6}
+            target = next((weekday for name, weekday in weekday_names.items()
+                           if name in normalized), None)
+            if target is None:
+                return {'kind': 'note', 'text': 'จะให้ปลุกวันไหนครับ เช่น พรุ่งนี้'}
+            offset = (target - today.weekday()) % 7
+            if offset == 0 and hour is not None:
+                proposed = datetime.datetime.combine(today, datetime.time(hour, minute))
+                if proposed <= datetime.datetime.now():
+                    offset = 7
+            day = today + datetime.timedelta(days=offset)
 
     due = datetime.datetime.combine(day, datetime.time(hour, minute))
     args = {'title': 'ปลุกผม', 'due_date': due.strftime('%Y-%m-%d %H:%M'),

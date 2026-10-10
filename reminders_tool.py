@@ -12,6 +12,7 @@
 
 import datetime
 import json
+from urllib.parse import urlencode
 import reminders
 from debug_log import log as debug_log
 
@@ -147,10 +148,16 @@ def create_reminder(title, due_date=None, notes=None,
             'notes': notes or '',
         }, ensure_ascii=False)
         debug_log('reminders: dispatching timed reminder to shortcut=%s' % URGENT_SHORTCUT_NAME)
-        shortcuts.open_shortcuts_app(
-            name=URGENT_SHORTCUT_NAME,
-            shortcut_input=payload,
-        )
+        # ใช้ x-callback เพื่อกลับเข้า Pythonista หลัง Shortcut จบ แทนการทิ้งผู้ใช้ไว้ที่ Home
+        query = urlencode({
+            'name': URGENT_SHORTCUT_NAME,
+            'input': 'text',
+            'text': payload,
+            'x-success': 'pythonista3://',
+            'x-cancel': 'pythonista3://',
+            'x-error': 'pythonista3://',
+        })
+        shortcuts.open_url('shortcuts://x-callback-url/run-shortcut?' + query)
         debug_log('reminders: shortcut launched')
         return 'shortcut'
 
