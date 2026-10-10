@@ -15,10 +15,12 @@ import ast
 import datetime
 import ui
 import re
+import time
 import ai_client
 import date_guard
 import reminders_tool
 import reminder_search
+import results_view
 import tools
 from overlays import ConfirmOverlay, ChoiceOverlay, NoTimeConfirmOverlay
 from debug_log import log as debug_log
@@ -326,7 +328,8 @@ def _local_wake_alarm_action(text):
                     elif n == 12:
                         hour = 12
                     else:
-                        return {'kind': 'note', 'text': 'หมายถึงกี่โมงครับ เช่น 6 โมงเช้า หรือ 6 โมงเย็น'}
+                        return {'kind': 'note', 'pending': True,
+                                'text': 'หมายถึงกี่โมงครับ เช่น 6 โมงเช้า หรือ 6 โมงเย็น'}
                     if not 0 <= hour <= 23:
                         return {'kind': 'note', 'text': 'เวลาไม่ถูกต้องครับ กรุณาบอกเวลาอีกครั้ง'}
                     minute = 0
@@ -343,7 +346,7 @@ def _local_wake_alarm_action(text):
                         minute = 0
 
     if hour is None:
-        return {'kind': 'note', 'text': 'จะให้ปลุกกี่โมงครับ'}
+        return {'kind': 'note', 'pending': True, 'text': 'จะให้ปลุกกี่โมงครับ'}
 
     today = datetime.date.today()
     if 'มะรืน' in normalized:
@@ -365,13 +368,19 @@ def _local_wake_alarm_action(text):
             target = next((weekday for name, weekday in weekday_names.items()
                            if name in normalized), None)
             if target is None:
-                return {'kind': 'note', 'text': 'จะให้ปลุกวันไหนครับ เช่น พรุ่งนี้'}
-            offset = (target - today.weekday()) % 7
-            if offset == 0 and hour is not None:
+                # ไม่บอกวัน = เวลานั้นที่จะมาถึงครั้งถัดไป (วันนี้ถ้ายังไม่ถึง ไม่งั้นพรุ่งนี้)
                 proposed = datetime.datetime.combine(today, datetime.time(hour, minute))
-                if proposed <= datetime.datetime.now():
-                    offset = 7
-            day = today + datetime.timedelta(days=offset)
+                if proposed > datetime.datetime.now():
+                    day = today
+                else:
+                    day = today + datetime.timedelta(days=1)
+            else:
+                offset = (target - today.weekday()) % 7
+                if offset == 0:
+                    proposed = datetime.datetime.combine(today, datetime.time(hour, minute))
+                    if proposed <= datetime.datetime.now():
+                        offset = 7
+                day = today + datetime.timedelta(days=offset)
 
     due = datetime.datetime.combine(day, datetime.time(hour, minute))
     args = {'title': 'ปลุกผม', 'due_date': due.strftime('%Y-%m-%d %H:%M'),
@@ -380,14 +389,43 @@ def _local_wake_alarm_action(text):
                                     'arguments': args}}
 
 
+# คำสั่งปลุกที่ระบบถามกลับเรื่องเวลา (จำไว้ให้คำตอบสั้น ๆ เช่น "เจ็ดโมงเช้า" ต่อกับคำสั่งเดิมได้)
+_WAKE_PENDING = {'text': None, 'time': 0.0}
+_WAKE_PENDING_SECONDS = 300
+_NOT_WAKE_ANSWER = ('นัด', 'รายการ', 'งาน', 'เตือน', 'อะไร', 'ลิสต์', 'ต้องทำ', 'ลบ', 'เลื่อน')
+
+
+def _wake_pending_text(sent_text):
+    """คืนคำสั่งปลุกเดิม ถ้าข้อความนี้เป็นคำตอบสั้น ๆ ที่มีเวลา/วัน ไม่ใช่คำสั่งใหม่ ไม่งั้นคืน None
+    ใช้ได้ครั้งเดียวต่อคำถาม และหมดอายุใน 5 นาที"""
+    previous = _WAKE_PENDING.get('text')
+    stamp = _WAKE_PENDING.get('time', 0.0)
+    _WAKE_PENDING['text'] = None
+    if not previous or time.time() - stamp > _WAKE_PENDING_SECONDS:
+        return None
+    answer = sent_text.strip()
+    if 'ปลุก' in answer or len(answer) > 40:
+        return None
+    if any(word in answer for word in _NOT_WAKE_ANSWER):
+        return None
+    if not (_has_explicit_time(answer) or _has_explicit_date(answer)):
+        return None
+    return previous
+
+
 def ask_ai(sent_text, on_chunk, token, model, history):
     """คืน (text, tool_calls) ถ้ามีปัญหาจะ raise ai_client.AIError"""
     # คำถามค้นนัดและคำตอบต่อ ให้โค้ดตัดสินเอง ไม่พึ่งการเลือกเครื่องมือของโมเดลเล็ก
     turns = [{'user': str(m.get('content') or '')}
              for m in (history or []) if m.get('role') == 'user']
-    wake = _local_wake_alarm_action(sent_text)
+    previous_wake = _wake_pending_text(sent_text)
+    wake_text = (previous_wake + ' ' + sent_text) if previous_wake else sent_text
+    wake = _local_wake_alarm_action(wake_text)
     if wake:
         if wake['kind'] == 'note':
+            if wake.get('pending'):
+                _WAKE_PENDING['text'] = wake_text
+                _WAKE_PENDING['time'] = time.time()
             return '', [{'id': None, 'name': '_note',
                          'local_note': wake['text'], 'arguments': {}}]
         return '', [wake['call']]
@@ -547,7 +585,27 @@ class _ActionRunner:
         debug_log('flow: search keywords=%s' % ','.join(action['keywords'][:4]))
         # หมายเลขในผลค้นไม่ตรงกับ snapshot เดิม ล้างทิ้งเพื่อกันสั่งเลื่อน/ลบผิดรายการ
         self.host._reminder_snapshot = []
-        self.lines.append(reminder_search.run_search(action))
+        text, dated, undated = reminder_search.run_search_full(action)
+        total = len(dated) + len(undated)
+        if total <= results_view.TABLE_THRESHOLD:
+            self.lines.append(text)
+            self.step()
+            return
+        # ผลเยอะ: แชทเหลือบรรทัดสรุป รายการเต็มดูในตาราง (อ่านอย่างเดียว) แล้วทำงานต่อหลังกดปิด
+        header = text.split('\n', 1)[0].rstrip(':')
+        self.lines.append('%s\n(แสดงเป็นตารางแล้ว)' % header)
+        debug_log('flow: showing ResultsOverlay rows=%d' % total)
+        self.host.show_overlay(results_view.ResultsOverlay(
+            header, dated, undated, self.on_results_closed))
+
+    def on_results_closed(self):
+        debug_log('flow: on_results_closed')
+        ui.delay(self.do_results_closed, 0.3)
+
+    def do_results_closed(self):
+        if self.finished:
+            return
+        debug_log('flow: do_results_closed calling step()')
         self.step()
 
     def show_list(self, period):

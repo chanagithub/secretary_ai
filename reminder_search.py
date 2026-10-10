@@ -290,12 +290,17 @@ def format_results(dated, undated, keywords, when='upcoming', topics=None):
 
 def run_search(action):
     """ทำการค้นแล้วคืนข้อความสำหรับแสดงในแชท (ไม่ throw)"""
+    return run_search_full(action)[0]
+
+
+def run_search_full(action):
+    """เหมือน run_search แต่คืน (ข้อความ, dated, undated) เพื่อให้หน้าตารางใช้แถวชุดเดียวกัน (ไม่ throw)"""
     _remember(action)
     when = action.get('when', 'upcoming')
     try:
         dated, undated = search_reminders(action['keywords'], when, action.get('period'))
     except Exception as e:
-        return 'ค้นรายการเตือนไม่สำเร็จ: %s' % e
+        return 'ค้นรายการเตือนไม่สำเร็จ: %s' % e, [], []
     text = format_results(dated, undated, action['keywords'], when, action.get('topics'))
     if action.get('period'):
         period = action['period']
@@ -303,4 +308,4 @@ def run_search(action):
                             ' (%s %s)' % (_SCOPE[when][0], period['label']))
     if search_terms.LOAD_ERROR:
         text += '\n(หมายเหตุ: %s)' % search_terms.LOAD_ERROR
-    return text
+    return text, dated, undated
