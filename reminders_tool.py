@@ -155,8 +155,8 @@ def create_reminder(title, due_date=None, notes=None,
             'text': payload,
             'x-success': 'pythonista3://',
             'x-cancel': 'pythonista3://',
-            # อย่ากลบข้อผิดพลาดด้วยการพากลับ Pythonista; เปิด Shortcuts ให้เห็นจุดที่ล้มเหลว
-            'x-error': 'shortcuts://',
+            # [DEBUG] ไม่ใส่ x-error ชั่วคราว: เดิมตั้งเป็น 'shortcuts://' ซึ่งแค่เปิดหน้าหลัก Shortcuts
+            # และทิ้งข้อความ error ถ้าไม่มี x-error แอป Shortcuts จะแสดง error ของมันเอง
         }, quote_via=quote)  # ต้องเป็น %20 ไม่ใช่ '+' (ชื่อ Shortcut และเวลา "2026-10-12 05:00" มีช่องว่าง)
         url = 'shortcuts://x-callback-url/run-shortcut?' + query
         debug_log('reminders: shortcut url=%s' % url)
