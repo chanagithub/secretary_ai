@@ -16,7 +16,7 @@ import reminders
 from debug_log import log as debug_log
 
 AI_LIST_NAME = "เลขา AI"
-URGENT_SHORTCUT_NAME = "ทดลองสร้าง Urgent Reminder"
+URGENT_SHORTCUT_NAME = "สร้าง Urgent Reminder"
 
 
 def get_ai_calendar():
@@ -103,7 +103,8 @@ def _create_all_day(calendar, title, notes, day):
 
 
 def create_reminder(title, due_date=None, notes=None,
-                     alarm_minutes_before=None, calendar=None, has_time=True):
+                     alarm_minutes_before=None, calendar=None, has_time=True,
+                     urgent_alarm=False):
     """
     สร้างรีมายเดอร์ 1 รายการ แล้วบันทึกเข้าแอป Reminders จริง
 
@@ -117,8 +118,8 @@ def create_reminder(title, due_date=None, notes=None,
               โมดูล reminders ของ Pythonista ทำแบบนี้ไม่ได้ (ส่งเป็น 00:00) จึงเขียนผ่าน EventKit
               ตรง ๆ (ทดสอบบน iPhone แล้วด้วย test_allday.py) ถ้าไม่สำเร็จจะ raise ไม่ย้อนไปใช้ 00:00
 
-    รายการที่มีเวลาจะส่งให้ Shortcut ซึ่งเปิด Urgent ไว้ ส่วนรายการ all-day
-    ยังคงสร้างผ่าน EventKit ตามเดิม
+    urgent_alarm=True จะส่งรายการที่มีเวลาให้ Shortcut ซึ่งเปิด Urgent ไว้
+    รายการทั่วไปและรายการ all-day จะสร้างผ่านทางปกติโดยไม่มี Urgent
 
     คืนค่า: 'shortcut' เมื่อส่งให้ Shortcut, reminders.Reminder object เมื่อสร้างตรง,
     และ None สำหรับ all-day
@@ -132,7 +133,7 @@ def create_reminder(title, due_date=None, notes=None,
         debug_log('reminders: all-day saved')
         return None
 
-    if due_date is not None and has_time:
+    if urgent_alarm and due_date is not None and has_time:
         try:
             import shortcuts
         except ImportError:

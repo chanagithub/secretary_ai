@@ -40,6 +40,14 @@ CREATE_REMINDER_SCHEMA = {
                     'type': 'string',
                     'description': 'รายละเอียดเพิ่มเติม ถ้ามี (ไม่บังคับ)',
                 },
+                'urgent_alarm': {
+                    'type': 'boolean',
+                    'description': (
+                        'ตั้งเป็นเสียงปลุกยาวแบบนาฬิกา เฉพาะเมื่อผู้ใช้สั่งให้ปลุกโดยตรง '
+                        'เช่น "ช่วยปลุกผมตอน 7 โมงเช้า" หรือ "ตั้งปลุก"; '
+                        'ถ้าเป็นนัดหมาย/งาน/เตือนทั่วไป ให้ false เสมอ'
+                    ),
+                },
             },
             'required': ['title', 'due_date'],
         },
@@ -51,8 +59,8 @@ LIST_REMINDERS_SCHEMA = {
     'function': {
         'name': 'list_reminders',
         'description': (
-            'ดูรายการงาน/การเตือนที่ยังไม่เสร็จของวันที่ระบุ (เฉพาะที่เลขาสร้างไว้) '
-            'เรียกเมื่อผู้ใช้ถามว่าวันนี้/พรุ่งนี้/วันที่ใดมีงานหรือนัดอะไรบ้าง'
+            'ดูรายการเตือนจากทุกลิสต์ใน Reminders ตามวันที่หรือเดือน และสถานะ '
+            'เรียกเมื่อผู้ใช้ถามว่าวันนี้/พรุ่งนี้/เดือนใดมีงานหรือนัดอะไรบ้าง'
         ),
         'parameters': {
             'type': 'object',
@@ -122,7 +130,7 @@ def validate_create_reminder(arguments):
     """ตรวจค่าที่ AI ส่งมาสำหรับ create_reminder ก่อนนำไปสร้างจริง
 
     arguments: dict จาก AI ({'title':.., 'due_date':.., 'notes':..})
-    คืนค่า: dict ที่ตรวจแล้ว {'title':.., 'due_date': datetime, 'notes':.., 'has_time': bool}
+    คืนค่า: dict ที่ตรวจแล้ว มี urgent_alarm=True เฉพาะค่าบูลีน True ที่ AI ส่งมา
     due_date เป็น 'YYYY-MM-DD' (ไม่มีเวลา) ได้ -> has_time=False และ due_date เป็นเที่ยงคืนของวันนั้น
     ถ้าไม่ผ่าน raise ToolValidationError
     """
@@ -177,7 +185,8 @@ def validate_create_reminder(arguments):
 
     notes = (arguments.get('notes') or '').strip() or None
     return {'title': title, 'due_date': due_date, 'notes': notes,
-            'has_time': has_time}
+            'has_time': has_time,
+            'urgent_alarm': arguments.get('urgent_alarm') is True}
 
 
 def format_confirm_text(validated):

@@ -363,7 +363,8 @@ def _save(validated):
         title=validated['title'],
         due_date=validated['due_date'],
         notes=validated['notes'],
-        has_time=validated.get('has_time', True))
+        has_time=validated.get('has_time', True),
+        urgent_alarm=validated.get('urgent_alarm', False))
     debug_log('flow: _save done')
     return result
 
