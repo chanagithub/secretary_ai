@@ -155,7 +155,8 @@ def create_reminder(title, due_date=None, notes=None,
             'text': payload,
             'x-success': 'pythonista3://',
             'x-cancel': 'pythonista3://',
-            'x-error': 'pythonista3://',
+            # อย่ากลบข้อผิดพลาดด้วยการพากลับ Pythonista; เปิด Shortcuts ให้เห็นจุดที่ล้มเหลว
+            'x-error': 'shortcuts://',
         })
         shortcuts.open_url('shortcuts://x-callback-url/run-shortcut?' + query)
         debug_log('reminders: shortcut launched')
