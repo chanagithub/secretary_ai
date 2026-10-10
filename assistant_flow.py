@@ -11,12 +11,14 @@
 ไฟล์นี้ไม่ผูกกับหน้าจอหลักโดยตรง: ใช้ host.show_overlay(overlay) เพื่อแสดงป๊อปอัป
 เท่านั้น
 """
+import ast
 import datetime
 import ui
 import re
 import ai_client
 import date_guard
 import reminders_tool
+import reminder_search
 import tools
 from overlays import ConfirmOverlay, ChoiceOverlay, NoTimeConfirmOverlay
 from debug_log import log as debug_log
@@ -191,11 +193,53 @@ def local_list_action(text, turns=None):
     return None
 
 # ---------- 2) คุยกับ AI ----------
+_TOOL_NAMES = ('create_reminder', 'list_reminders', 'search_reminders',
+               'reschedule_reminder', 'complete_reminder', 'delete_reminder')
+_PSEUDO_FALLBACK = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
+
+
+def _recover_pseudo_call(text):
+    """โมเดลเล็กบางครั้งพิมพ์ tool call เป็นโค้ด เช่น print(default_api.list_reminders(...))
+    แปลงกลับเป็น tool call จริง (ไม่รันโค้ด แค่อ่านค่าด้วย ast) แล้วให้ระบบตรวจค่าตามปกติ"""
+    for name in _TOOL_NAMES:
+        start = text.find(name + '(')
+        if start < 0:
+            continue
+        for end in range(min(len(text), start + 600), start + len(name) + 1, -1):
+            try:
+                node = ast.parse(text[start:end], mode='eval').body
+            except (SyntaxError, ValueError):
+                continue
+            if not isinstance(node, ast.Call):
+                break
+            try:
+                args = {k.arg: ast.literal_eval(k.value) for k in node.keywords if k.arg}
+            except ValueError:
+                break
+            return {'id': None, 'name': name, 'arguments': args}
+    return None
+
+
 def ask_ai(sent_text, on_chunk, token, model, history):
     """คืน (text, tool_calls) ถ้ามีปัญหาจะ raise ai_client.AIError"""
-    return ai_client.stream_chat_with_tools(
-        sent_text, on_chunk, token, tools.ALL_TOOLS,
+    # คำถามค้นนัดและคำตอบต่อ ให้โค้ดตัดสินเอง ไม่พึ่งการเลือกเครื่องมือของโมเดลเล็ก
+    turns = [{'user': str(m.get('content') or '')}
+             for m in (history or []) if m.get('role') == 'user']
+    local = reminder_search.local_search_action(sent_text, turns)
+    if local:
+        return '', [{'id': None, 'name': 'search_reminders',
+                     'arguments': {'keywords': local['keywords'],
+                                   'include_past': local['include_past']}}]
+    text, calls = ai_client.stream_chat_with_tools(
+        sent_text, on_chunk, token,
+        tools.ALL_TOOLS + [reminder_search.SEARCH_REMINDERS_SCHEMA],
         model=model, history=history)
+    if not calls and text and ('default_api' in text
+                               or any(n + '(' in text for n in _TOOL_NAMES)):
+        recovered = _recover_pseudo_call(text)
+        debug_log('flow: pseudo tool-call text, recovered=%s' % bool(recovered))
+        return ('', [recovered]) if recovered else (_PSEUDO_FALLBACK, [])
+    return text, calls
 
 # ---------- 3) ตรวจค่า + ยืนยัน + บันทึก ----------
 def prepare_actions(tool_calls, host=None):
@@ -211,6 +255,12 @@ def prepare_actions(tool_calls, host=None):
         if name == 'list_reminders':
             try:
                 actions.append({'kind': 'list', 'period': tools.validate_list_reminders(args)})
+            except tools.ToolValidationError as e:
+                actions.append({'kind': 'note', 'text': 'ตรวจค่าไม่ผ่าน: %s' % e})
+            continue
+        if name == 'search_reminders':
+            try:
+                actions.append(reminder_search.validate_search(args))
             except tools.ToolValidationError as e:
                 actions.append({'kind': 'note', 'text': 'ตรวจค่าไม่ผ่าน: %s' % e})
             continue
@@ -288,6 +338,9 @@ class _ActionRunner:
         if action['kind'] == 'list':
             self.show_list(action['period'])
             return
+        if action['kind'] == 'search':
+            self.show_search(action)
+            return
         if action['kind'] in ('reschedule', 'complete_reminder', 'delete_reminder'):
             self.current_action = action
             self.show_mutation_confirm(action)
@@ -304,6 +357,14 @@ class _ActionRunner:
             self.show_confirm()
         else:
             self.show_time_choice()
+
+    def show_search(self, action):
+        """ค้นด้วยข้อความจากทุกลิสต์ (อ่านอย่างเดียว ไม่มีป๊อปอัป ไม่มีปุ่มแก้/ลบ)"""
+        debug_log('flow: search keywords=%s' % ','.join(action['keywords'][:4]))
+        # หมายเลขในผลค้นไม่ตรงกับ snapshot เดิม ล้างทิ้งเพื่อกันสั่งเลื่อน/ลบผิดรายการ
+        self.host._reminder_snapshot = []
+        self.lines.append(reminder_search.run_search(action))
+        self.step()
 
     def show_list(self, period):
         try:

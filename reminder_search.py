@@ -1,12 +1,14 @@
 # reminder_search.py
 """ค้น Reminder ด้วยข้อความ จากทุกลิสต์ (อ่านอย่างเดียว)
 
-- AI/โค้ดช่วยแปลงคำถามเป็นคำค้น ส่วนการค้นและวันที่มาจาก Reminders จริงเท่านั้น
+- โค้ดเป็นผู้ขยายคำค้น (คำพ้อง/ชื่อสถานที่/คำย่อ) และเป็นผู้ค้น ไม่ใช่ AI
 - ผลเรียงวันที่ใกล้ไปไกล แสดงเป็นหมายเลข 1, 2, 3 พร้อมชื่อลิสต์ต้นทาง
 - ค่าเริ่มต้น: เฉพาะที่ยังไม่เสร็จและตั้งแต่วันนี้เป็นต้นไป
+- จำคำค้นล่าสุดไว้ชั่วคราว เพื่อให้ตอบต่อได้ เช่น "เฉพาะที่ยังไม่เสร็จ"
 """
 import datetime
 import re
+import time
 
 import tools
 
@@ -17,7 +19,7 @@ SEARCH_REMINDERS_SCHEMA = {
         'description': (
             'ค้นนัดหมาย/การเตือนจากข้อความในทุกลิสต์ของ Reminders '
             'เรียกเมื่อผู้ใช้ถามว่านัดหรือเรื่องใดคือวันไหน/เมื่อไหร่ '
-            'เช่น "นัดหมอวันไหน" "ไปกินข้าวกับเพื่อนวันไหน"'
+            'เช่น "นัดหมอวันไหน" "ไปกินข้าวกับเพื่อนวันไหน" "ปันผลวันไหน"'
         ),
         'parameters': {
             'type': 'object',
@@ -26,13 +28,9 @@ SEARCH_REMINDERS_SCHEMA = {
                     'type': 'array',
                     'items': {'type': 'string'},
                     'description': (
-                        'คำค้นสั้น ๆ ภาษาไทย พร้อมคำพ้อง 2-8 คำ เช่น หมอ ถามหาหมอ ให้ใส่ '
-                        'หมอ, แพทย์, โรงพยาบาล, คลินิก ห้ามใส่วันที่'
+                        'คำค้นสั้น ๆ จากสิ่งที่ผู้ใช้ถาม เช่น หมอ, ปันผล, เพื่อน '
+                        '(ระบบขยายคำพ้องให้เอง) ห้ามใส่วันที่'
                     ),
-                },
-                'include_past': {
-                    'type': 'boolean',
-                    'description': 'true เฉพาะเมื่อผู้ใช้ขอดูที่เสร็จแล้วหรือที่ผ่านมาแล้ว',
                 },
             },
             'required': ['keywords'],
@@ -40,7 +38,17 @@ SEARCH_REMINDERS_SCHEMA = {
     },
 }
 
+_MEDICAL_TERMS = [
+    'หมอ', 'แพทย์', 'โรงพยาบาล', 'รพ.', 'คลินิก', 'ตรวจสุขภาพ', 'ตรวจร่างกาย',
+    'ตรวจเลือด', 'เจาะเลือด', 'ผลเลือด', 'เอกซเรย์', 'อัลตราซาวด์', 'OPD',
+    'ผู้ป่วยนอก', 'อายุรกรรม', 'โรคหัวใจ', 'ศิริราช', 'สยามมินทร์',
+    'นพ.', 'พญ.', 'ทพ.', 'ทพญ.', 'อ.',
+    'ทำฟัน', 'หมอฟัน', 'ทันตแพทย์', 'ทันตกรรม', 'จัดฟัน', 'ขูดหินปูน',
+    'รามาธิบดี', 'บำรุงราษฎร์', 'สมิติเวช', 'พญาไท', 'บางปะกอก', 'จุฬาลงกรณ์',
+]
+
 # (ชื่อกลุ่ม, คำที่ผู้ใช้พูดแล้วเรียกกลุ่มนี้, คำที่ใช้จับคู่ใน Reminder, เป็นกลุ่มเฉพาะทางไหม)
+# กลุ่มเฉพาะทางที่ถูกเรียก จะไม่ขยายเป็นกลุ่มหมอทั่วไป
 _GROUPS = [
     ('dental', ['ทำฟัน', 'หมอฟัน', 'ทันตแพทย์', 'ทันตกรรม', 'จัดฟัน', 'ขูดหินปูน', 'ฟัน'],
      ['ทำฟัน', 'หมอฟัน', 'ทันตแพทย์', 'ทันตกรรม', 'จัดฟัน', 'ขูดหินปูน', 'ฟัน'], True),
@@ -49,40 +57,54 @@ _GROUPS = [
       'หมา', 'แมว', 'สุนัข'], True),
     ('blood', ['ตรวจเลือด', 'เจาะเลือด', 'ผลเลือด'],
      ['ตรวจเลือด', 'เจาะเลือด', 'ผลเลือด'], True),
-    ('doctor', ['หมอ', 'แพทย์', 'โรงพยาบาล', 'รพ.', 'คลินิก', 'ตรวจสุขภาพ'],
-     ['หมอ', 'แพทย์', 'โรงพยาบาล', 'รพ.', 'คลินิก', 'ตรวจสุขภาพ'], False),
+    ('siriraj', ['ศิริราช', 'สยามมินทร์'],
+     ['ศิริราช', 'สยามมินทร์', 'โรคหัวใจ'], True),
+    ('dividend', ['ปันผล', 'dividend', 'div', 'xd'],
+     ['ปันผล', 'เงินปันผล', 'dividend', 'dividends', 'div', 'xd'], True),
+    ('doctor', ['หมอ', 'แพทย์', 'โรงพยาบาล', 'รพ.', 'คลินิก', 'ตรวจสุขภาพ', 'ตรวจร่างกาย'],
+     _MEDICAL_TERMS, False),
     ('friend', ['เพื่อน', 'แก๊ง'], ['เพื่อน', 'แก๊ง'], False),
     ('meal', ['กินข้าว', 'ทานข้าว', 'ข้าวเย็น', 'ข้าวเที่ยง', 'มื้อเย็น', 'มื้อเที่ยง',
               'อาหารเย็น', 'ดินเนอร์', 'ร้านอาหาร'],
      ['กินข้าว', 'ทานข้าว', 'ข้าวเย็น', 'ข้าวเที่ยง', 'มื้อเย็น', 'มื้อเที่ยง',
       'อาหารเย็น', 'ดินเนอร์', 'ร้านอาหาร'], False),
 ]
-_HOSPITALS = ['ศิริราช', 'รามาธิบดี', 'จุฬา', 'บำรุงราษฎร์', 'รามา']
+_HOSPITALS = ['รามาธิบดี', 'บำรุงราษฎร์', 'สมิติเวช', 'พญาไท', 'บางปะกอก', 'จุฬาลงกรณ์']
 
-# กันคำชนกัน เช่น หมอน, นัดหมาย, สัตวแพทย์ ไม่ใช่หมอคน
+# กันคำชนกัน เช่น หมอน, นัดหมาย, หมอสัตว์/คลินิกสัตว์ (ไม่ใช่หมอคน), อ.เมือง (อำเภอ)
 _PATTERNS = {
-    'หมอ': r'หมอ(?!น)',
+    'หมอ': r'หมอ(?!น|สัตว)',
+    'คลินิก': r'คลินิก(?!สัตว)',
     'หมา': r'หมา(?![ยก])',
     'แพทย์': r'(?<!สัตว)(?<!ทันต)แพทย์',
+    'อ.': r'(?:นัด|พบ|กับ|หา|เจอ)\s*อ\.\s*[ก-๙A-Za-z]',
 }
 
-_QUESTION_WORDS = ('วันไหน', 'เมื่อไหร่', 'เมื่อไร', 'วันอะไร', 'ตอนไหน', 'กี่โมง')
+_QUESTION_WORDS = ('วันไหน', 'เมื่อไหร่', 'เมื่อไร', 'เมื่อใด', 'วันอะไร', 'ตอนไหน', 'กี่โมง')
 _PAST_WORDS = ('ที่ผ่านมา', 'ที่ผ่านไปแล้ว', 'ย้อนหลัง', 'ที่เสร็จแล้ว')
+_OPEN_WORDS = ('ยังไม่เสร็จ', 'ไม่เอาที่ผ่านมา', 'ไม่รวมที่ผ่านมา', 'ไม่เอาที่เสร็จ',
+               'เฉพาะอนาคต', 'เฉพาะที่จะถึง', 'ที่ยังไม่ถึง')
+
+_LAST = {'keywords': None, 'ts': 0.0}
+_LAST_TTL = 20 * 60  # วินาที: ตอบต่อได้ภายใน 20 นาทีหลังค้นครั้งล่าสุด
 
 
 def _match(keyword, text):
     pattern = _PATTERNS.get(keyword)
     if pattern:
         return re.search(pattern, text) is not None
+    if keyword.isascii():  # DIV, XD, OPD: ต้องเป็นคำเดี่ยว ไม่ติดตัวอักษรอังกฤษ และไม่สนตัวพิมพ์
+        pat = r'(?<![A-Za-z0-9])%s(?![A-Za-z0-9])' % re.escape(keyword)
+        return re.search(pat, text, re.IGNORECASE) is not None
     return keyword in text
 
 
 def expand_keywords(text):
-    """คำค้นจากประโยคผู้ใช้ด้วยกลุ่มคำพ้องที่รู้จัก (คืน [] ถ้าไม่รู้จักเลย)"""
+    """คำค้นจากประโยค/คำค้นด้วยกลุ่มคำพ้องที่รู้จัก (คืน [] ถ้าไม่รู้จักเลย)"""
     found = []
     specific_hit = False
-    for _name, triggers, terms, specific in _GROUPS:
-        if specific_hit and _name == 'doctor':
+    for name, triggers, terms, specific in _GROUPS:
+        if specific_hit and name == 'doctor':
             continue
         if any(_match(t, text) for t in triggers):
             found.extend(terms)
@@ -101,29 +123,42 @@ def _is_question(text):
     return any(w in text for w in _QUESTION_WORDS)
 
 
+def _remember(keywords):
+    _LAST['keywords'] = list(keywords)
+    _LAST['ts'] = time.time()
+
+
+def _last_keywords(turns):
+    if _LAST['keywords'] and time.time() - _LAST['ts'] <= _LAST_TTL:
+        return _LAST['keywords']
+    for turn in reversed(turns or []):
+        prior = str(turn.get('user') or '')
+        if _is_question(prior):
+            return expand_keywords(prior) or None
+    return None
+
+
 def local_search_action(text, turns=None):
     """ตรวจเจตนาค้นด้วยโค้ด (ไม่พึ่ง AI) คืน action หรือ None"""
-    include_past = any(w in text for w in _PAST_WORDS)
+    only_open = any(w in text for w in _OPEN_WORDS)
+    include_past = any(w in text for w in _PAST_WORDS) and not only_open
     if _is_question(text):
         keywords = expand_keywords(text)
         if keywords:
             return {'kind': 'search', 'keywords': keywords,
                     'include_past': include_past}
         return None
-    if include_past:  # ตอบต่อ เช่น "ดูที่ผ่านมาแล้วด้วย" ใช้คำค้นจากคำถามก่อนหน้า
-        for turn in reversed(turns or []):
-            prior = str(turn.get('user') or '')
-            if _is_question(prior):
-                keywords = expand_keywords(prior)
-                if keywords:
-                    return {'kind': 'search', 'keywords': keywords,
-                            'include_past': True}
-                break
+    # ตอบต่อสั้น ๆ เช่น "เฉพาะที่ยังไม่เสร็จ" / "ดูที่ผ่านมาแล้วด้วย"
+    if len(text.strip()) <= 60 and (only_open or include_past):
+        keywords = _last_keywords(turns)
+        if keywords:
+            return {'kind': 'search', 'keywords': keywords,
+                    'include_past': include_past}
     return None
 
 
 def validate_search(arguments):
-    """ตรวจค่าจาก AI คืน action {'kind': 'search', ...}"""
+    """ตรวจค่าจาก AI คืน action {'kind': 'search', ...} และให้โค้ดขยายคำพ้องเพิ่มเอง"""
     raw = arguments.get('keywords')
     if isinstance(raw, str):
         raw = re.split(r'[,،、\n]', raw)
@@ -138,7 +173,11 @@ def validate_search(arguments):
     if not keywords:
         raise tools.ToolValidationError(
             'AI ไม่ได้ระบุคำค้น กรุณาบอกว่าจะค้นนัดเรื่องอะไร')
-    return {'kind': 'search', 'keywords': keywords[:12],
+    for k in expand_keywords(' '.join(keywords)):
+        if k not in seen:
+            seen.add(k)
+            keywords.append(k)
+    return {'kind': 'search', 'keywords': keywords[:40],
             'include_past': bool(arguments.get('include_past'))}
 
 
@@ -202,6 +241,7 @@ def format_results(dated, undated, keywords, include_past):
 
 def run_search(action):
     """ทำการค้นแล้วคืนข้อความสำหรับแสดงในแชท (ไม่ throw)"""
+    _remember(action['keywords'])
     try:
         dated, undated = search_reminders(action['keywords'], action['include_past'])
     except Exception as e:
