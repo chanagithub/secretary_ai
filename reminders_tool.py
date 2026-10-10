@@ -12,7 +12,7 @@
 
 import datetime
 import json
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 import reminders
 from debug_log import log as debug_log
 
@@ -157,8 +157,10 @@ def create_reminder(title, due_date=None, notes=None,
             'x-cancel': 'pythonista3://',
             # อย่ากลบข้อผิดพลาดด้วยการพากลับ Pythonista; เปิด Shortcuts ให้เห็นจุดที่ล้มเหลว
             'x-error': 'shortcuts://',
-        })
-        shortcuts.open_url('shortcuts://x-callback-url/run-shortcut?' + query)
+        }, quote_via=quote)  # ต้องเป็น %20 ไม่ใช่ '+' (ชื่อ Shortcut และเวลา "2026-10-12 05:00" มีช่องว่าง)
+        url = 'shortcuts://x-callback-url/run-shortcut?' + query
+        debug_log('reminders: shortcut url=%s' % url)
+        shortcuts.open_url(url)
         debug_log('reminders: shortcut launched')
         return 'shortcut'
 
