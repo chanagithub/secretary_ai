@@ -70,39 +70,7 @@ LIST_REMINDERS_SCHEMA = {
     },
 }
 
-RESCHEDULE_REMINDER_SCHEMA = {
-    'type': 'function', 'function': {
-        'name': 'reschedule_reminder',
-        'description': 'เลื่อนวันหรือเวลาของรายการที่แสดงในลิสต์ล่าสุด โดยอ้างอิงหมายเลขรายการ',
-        'parameters': {'type': 'object', 'properties': {
-            'number': {'type': 'integer', 'description': 'หมายเลขรายการจากลิสต์ล่าสุด'},
-            'new_date': {'type': 'string', 'description': 'วันใหม่ YYYY-MM-DD (ไม่บังคับ)'},
-            'new_time': {'type': 'string', 'description': 'เวลาใหม่ HH:MM (ไม่บังคับ)'},
-        }, 'required': ['number']}
-    }
-}
-COMPLETE_REMINDER_SCHEMA = {
-    'type': 'function', 'function': {
-        'name': 'complete_reminder',
-        'description': 'ทำเครื่องหมายรายการจากลิสต์ล่าสุดว่าเสร็จหรือยกเลิกแล้ว (กู้คืนได้)',
-        'parameters': {'type': 'object', 'properties': {
-            'number': {'type': 'integer', 'description': 'หมายเลขรายการจากลิสต์ล่าสุด'}
-        }, 'required': ['number']}
-    }
-}
-DELETE_REMINDER_SCHEMA = {
-    'type': 'function', 'function': {
-        'name': 'delete_reminder',
-        'description': 'ลบรายการจากลิสต์ล่าสุดอย่างถาวร ต้องยืนยันก่อนลบ',
-        'parameters': {'type': 'object', 'properties': {
-            'number': {'type': 'integer', 'description': 'หมายเลขรายการจากลิสต์ล่าสุด'}
-        }, 'required': ['number']}
-    }
-}
-
-ALL_TOOLS = [CREATE_REMINDER_SCHEMA, LIST_REMINDERS_SCHEMA,
-             RESCHEDULE_REMINDER_SCHEMA, COMPLETE_REMINDER_SCHEMA,
-             DELETE_REMINDER_SCHEMA]
+ALL_TOOLS = [CREATE_REMINDER_SCHEMA, LIST_REMINDERS_SCHEMA]
 
 
 class ToolValidationError(Exception):
@@ -220,42 +188,3 @@ def format_day_text(day):
     """วันที่ภาษาไทยสั้น ๆ เช่น 'ศุกร์ 9 ต.ค. 2026'"""
     return '%s %d %s %d' % (_WEEKDAYS_TH[day.weekday()], day.day,
                             _MONTHS_TH[day.month], day.year)
-
-
-def validate_reminder_number(arguments, snapshot):
-    try:
-        number = int(arguments.get('number'))
-    except (TypeError, ValueError):
-        raise ToolValidationError('ไม่พบหมายเลขรายการที่ถูกต้อง กรุณาแสดงรายการเตือนก่อน')
-    if number < 1 or number > len(snapshot):
-        raise ToolValidationError('หมายเลขรายการไม่อยู่ในลิสต์ล่าสุด กรุณาแสดงรายการเตือนใหม่')
-    return snapshot[number - 1]
-
-
-def validate_reschedule(arguments, snapshot):
-    item = validate_reminder_number(arguments, snapshot)
-    old_due = item['due']
-    date_text = (arguments.get('new_date') or '').strip()
-    time_text = (arguments.get('new_time') or '').strip()
-    if not date_text and not time_text:
-        raise ToolValidationError('กรุณาระบุวันใหม่หรือเวลาใหม่')
-    day = old_due.date()
-    if date_text:
-        try:
-            day = datetime.datetime.strptime(date_text, '%Y-%m-%d').date()
-        except ValueError:
-            raise ToolValidationError('วันใหม่ต้องอยู่ในรูปแบบ YYYY-MM-DD')
-    if time_text:
-        try:
-            t = datetime.datetime.strptime(time_text, '%H:%M').time()
-        except ValueError:
-            raise ToolValidationError('เวลาใหม่ต้องอยู่ในรูปแบบ HH:MM เช่น 15:30')
-        due = datetime.datetime.combine(day, t)
-    else:
-        due = datetime.datetime.combine(day, old_due.time())
-    now = datetime.datetime.now()
-    if due < now - datetime.timedelta(minutes=5):
-        raise ToolValidationError('วันเวลาใหม่ผ่านไปแล้ว กรุณาระบุเวลาในอนาคต')
-    if due > now + datetime.timedelta(days=730):
-        raise ToolValidationError('วันเวลาใหม่ไกลเกินไป กรุณาตรวจสอบอีกครั้ง')
-    return {'item': item, 'new_due': due}

@@ -162,21 +162,3 @@ def delete_reminder(reminder):
     """ลบถาวร"""
     if not reminders.delete_reminder(reminder):
         raise RuntimeError('ลบรายการไม่สำเร็จ')
-
-
-def reschedule_reminder(reminder, new_due):
-    """เปลี่ยนวัน/เวลาและคงระยะห่างของ alarm เดิมไว้ถ้ามี"""
-    old_due = _naive(reminder.due_date) if reminder.due_date else None
-    alarm_offsets = []
-    try:
-        for alarm in reminder.alarms or []:
-            alarm_date = _naive(alarm.date)
-            if old_due is not None:
-                alarm_offsets.append(old_due - alarm_date)
-    except Exception:
-        alarm_offsets = []
-    reminder.due_date = new_due
-    if alarm_offsets:
-        reminder.alarms = [reminders.Alarm(new_due - offset) for offset in alarm_offsets]
-    reminder.save()
-    return reminder

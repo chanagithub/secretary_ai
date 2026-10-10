@@ -36,6 +36,7 @@ class MainView(ui.View):
         self._action_base_text = ''
         self._action_runner = None
         self._keep_context = False  # True = รอบนี้ AI ถามเวลา ต้องจำไว้ให้รอบถัดไป
+        self._reminder_snapshot = []  # หมายเลขรายการล่าสุดที่ผู้ใช้เห็น ใช้กับคำสั่งต่อเนื่อง
 
         self.model_btn = ui.Button()
         self.model_btn.font = ('<system>', 14)
@@ -243,6 +244,12 @@ class MainView(ui.View):
             messages.append({'role': 'user',
                              'content': t.get('sent') or t.get('user', '')})
             messages.append({'role': 'assistant', 'content': t['ai']})
+        if self._reminder_snapshot:
+            rows = []
+            for i, item in enumerate(self._reminder_snapshot, 1):
+                rows.append('%d. %s — %s' % (i, item['due'].strftime('%Y-%m-%d %H:%M'), item['title']))
+            messages.append({'role': 'system', 'content':
+                'รายการเตือนล่าสุดที่แสดงให้ผู้ใช้เห็น (ใช้หมายเลขนี้เท่านั้นเมื่อสั่งเลื่อน/เสร็จ/ลบ):\n' + '\n'.join(rows)})
         return messages
 
     def begin_request(self, text):
@@ -343,7 +350,7 @@ class MainView(ui.View):
             self._finish_turn(text, 'ok')
             self.input.text = ''
             return
-        self._run_actions(text, assistant_flow.prepare_actions(calls))
+        self._run_actions(text, assistant_flow.prepare_actions(calls, self))
 
     def _run_actions(self, ai_text, actions):
         """เริ่มลำดับยืนยัน/บันทึก โดยใช้เมธอดของ MainView เป็น callback"""
@@ -400,6 +407,7 @@ class MainView(ui.View):
         self._chat_id = None
         self._turns = []
         self._live = None
+        self._reminder_snapshot = []
         self.render()
 
     def new_chat(self, sender):
@@ -470,6 +478,7 @@ class MainView(ui.View):
         self._chat_id = chat['id']
         self._turns = [t for t in chat['turns'] if isinstance(t, dict)]
         self._live = None
+        self._reminder_snapshot = []
         viewer.close()
         self.render()
 
