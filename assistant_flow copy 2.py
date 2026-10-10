@@ -16,7 +16,7 @@ import ai_client
 import date_guard
 import reminders_tool
 import tools
-from overlays import ConfirmOverlay, ChoiceOverlay, NoTimeConfirmOverlay
+from overlays import ConfirmOverlay, ChoiceOverlay
 from debug_log import log as debug_log
 
 # ---------- 1) ความกำกวมของชื่อวัน ----------
@@ -134,28 +134,39 @@ class _ActionRunner:
             'บันทึกการเตือนนี้ไหม?', self.current_body,
             self.on_ok, self.on_cancel, self.on_redo))
 
-    # ----- ผู้ใช้ไม่ได้บอกเวลา: ป๊อปอัปเดียว ตกลง(ไม่ระบุเวลา) / ระบุเวลา / ไม่เอา / ทำรายการใหม่ -----
+    # ----- ผู้ใช้ไม่ได้บอกเวลา: ให้เลือก ไม่ระบุเวลา / ระบุเวลา -----
     def show_time_choice(self):
-        debug_log('flow: showing NoTimeConfirmOverlay title=%s'
-                  % self.current_validated.get('title'))
-        self.host.show_overlay(NoTimeConfirmOverlay(
-            'ยังไม่ได้ระบุเวลา บันทึกแบบไม่ระบุเวลาไหม?', self.current_body,
-            self.on_ok, self.on_set_time, self.on_cancel, self.on_redo))
+        v = self.current_validated
+        d = v['due_date']
+        title = 'ยังไม่ได้ระบุเวลา\n"%s"\n%s' % (v['title'], tools.format_day_text(d.date()))
+        debug_log('flow: showing time choice title=%s' % v.get('title'))
+        self.host.show_overlay(ChoiceOverlay(
+            title,
+            [('ไม่ระบุเวลา', 'no_time'), ('ระบุเวลา', 'set_time')],
+            self.on_time_choice, self.on_time_cancel))
 
-    def on_set_time(self):
-        debug_log('flow: on_set_time button pressed')
-        ui.delay(self.do_set_time, 0.3)
+    def on_time_choice(self, value):
+        debug_log('flow: time choice pressed %s' % value)
+        self._time_value = value
+        ui.delay(self.do_time_choice, 0.3)
 
-    def do_set_time(self):
+    def do_time_choice(self):
         if self.finished:
             return
-        debug_log('flow: do_set_time running')
+        debug_log('flow: do_time_choice running %s' % self._time_value)
+        if self._time_value == 'no_time':
+            self.show_confirm()
+            return
         # ระบุเวลา: จบรอบนี้ (ยังไม่บันทึก) ให้ผู้ใช้บอกเวลาในข้อความถัดไป
         # host._keep_context = True ทำให้รอบนี้ยังเป็นความจำของแชท AI จึงรู้ว่าเป็นงานไหน
         self.lines.append('ยังไม่ได้บันทึก "%s": บอกเวลาที่ต้องการได้เลยครับ (เช่น บ่ายสอง)'
                           % self.current_validated['title'])
         self.host._keep_context = True
         self.finish()
+
+    def on_time_cancel(self):
+        debug_log('flow: time choice cancelled')
+        ui.delay(self.do_cancel, 0.3)
 
     def on_ok(self):
         debug_log('flow: on_ok button pressed')

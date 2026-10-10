@@ -111,20 +111,6 @@ class ConfirmOverlay(_Popup):
             body_height=130)
 
 
-class NoTimeConfirmOverlay(_Popup):
-    """ยืนยันการเตือนที่ผู้ใช้ไม่ได้บอกเวลา: ตกลง(ไม่ระบุเวลา) / ระบุเวลา / ไม่เอา / ทำรายการใหม่
-    ใช้ป๊อปอัปเดียวจบ ไม่เปิดป๊อปอัปซ้อนต่อกัน"""
-
-    def __init__(self, title, body, on_ok, on_set_time, on_cancel, on_redo):
-        super().__init__(
-            title, body,
-            [('ตกลง (ไม่ระบุเวลา)', _GREEN, 'white', on_ok),
-             ('ระบุเวลา', _BLUE, 'white', on_set_time),
-             ('ไม่เอา', _GRAY, 'black', on_cancel),
-             ('ทำรายการใหม่', _GRAY, 'black', on_redo)],
-            body_height=110)
-
-
 class ChoiceOverlay(_Popup):
     """ให้เลือกหนึ่งข้อ: options = [(ข้อความปุ่ม, ค่า), ...] แล้วเรียก on_pick(ค่า)"""
 
