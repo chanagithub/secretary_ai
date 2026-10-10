@@ -228,17 +228,22 @@ def ask_ai(sent_text, on_chunk, token, model, history):
     local = reminder_search.local_search_action(sent_text, turns)
     if local:
         return '', [{'id': None, 'name': 'search_reminders',
-                     'arguments': {'keywords': local['keywords'],
-                                   'include_past': local['include_past']}}]
+                     'arguments': {'topics': local['topics'],
+                                   'keywords': local['keywords'],
+                                   'when': local['when']}}]
     text, calls = ai_client.stream_chat_with_tools(
         sent_text, on_chunk, token,
-        tools.ALL_TOOLS + [reminder_search.SEARCH_REMINDERS_SCHEMA],
+        tools.ALL_TOOLS + [reminder_search.search_schema()],
         model=model, history=history)
     if not calls and text and ('default_api' in text
                                or any(n + '(' in text for n in _TOOL_NAMES)):
         recovered = _recover_pseudo_call(text)
         debug_log('flow: pseudo tool-call text, recovered=%s' % bool(recovered))
-        return ('', [recovered]) if recovered else (_PSEUDO_FALLBACK, [])
+        if recovered:
+            return '', [recovered]
+        # app_ui ใช้ข้อความที่สะสมจาก on_chunk เมื่อไม่มี tool call จึงส่งเป็น "ข้อความแจ้ง" แทน
+        return '', [{'id': None, 'name': '_note', 'local_note': _PSEUDO_FALLBACK,
+                     'arguments': {}}]
     return text, calls
 
 # ---------- 3) ตรวจค่า + ยืนยัน + บันทึก ----------
@@ -250,6 +255,9 @@ def prepare_actions(tool_calls, host=None):
     """
     actions = []
     for call in tool_calls:
+        if call.get('local_note'):  # ข้อความแจ้งจากโค้ดเอง (ai_client ไม่เคยสร้างคีย์นี้)
+            actions.append({'kind': 'note', 'text': call['local_note']})
+            continue
         name = call['name']
         args = call['arguments']
         if name == 'list_reminders':
