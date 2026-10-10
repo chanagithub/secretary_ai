@@ -110,7 +110,7 @@ class MainView(ui.View):
 
         def refresh():
             source.items[:] = [
-                {'title': name, 'subtitle': 'ถามว่า: %s' % ', '.join(body['triggers'])}
+                {'title': name, 'subtitle': body.get('meaning') or 'แตะเพื่อดูคำถามและคำค้น'}
                 for name, body in topics.items()]
             table.reload()
 
@@ -121,9 +121,15 @@ class MainView(ui.View):
             if row is None or row < 0 or row >= len(source.items):
                 return
             name = source.items[row]['title']
-            buttons = ['แก้ไข', 'ลบ', 'ปิด']
+            body = topics[name]
+            details = ('ความหมาย: %s\n\n'
+                       '“ถามว่า” = สำนวนที่ทำให้ระบบเลือกหัวข้อนี้\n%s\n\n'
+                       '“ค้นหา” = คำที่ใช้เทียบกับชื่อ/รายละเอียด Reminder\n%s' % (
+                           body.get('meaning') or '(ยังไม่ได้ใส่ความหมาย)',
+                           ', '.join(body.get('triggers', [])) or '(ไม่มี)',
+                           ', '.join(body.get('terms', [])) or '(ไม่มี)'))
             try:
-                choice = console.alert(name, 'เลือกจัดการหัวข้อนี้', *buttons)
+                choice = console.alert(name, details, 'แก้ไข', 'ลบ', 'ปิด')
             except KeyboardInterrupt:
                 return
             if choice == 'แก้ไข':
@@ -170,6 +176,9 @@ class MainView(ui.View):
             if name in topics and name != old_name:
                 console.hud_alert('มีหัวข้อนี้แล้ว เลือกชื่ออื่น', 'error', 2)
                 return
+            meaning = dialogs.input_alert(
+                'ความหมายของหัวข้อ', 'อธิบายสั้น ๆ ให้คุณตรวจดูในเมนู',
+                old.get('meaning', ''), 'ต่อไป')
             triggers = dialogs.input_alert(
                 'คำที่ผู้ใช้อาจถาม', 'คั่นแต่ละคำด้วยจุลภาค',
                 ', '.join(old.get('triggers', [])), 'ต่อไป')
@@ -181,7 +190,7 @@ class MainView(ui.View):
         updated = dict(topics)
         if old_name and old_name != name:
             updated.pop(old_name, None)
-        updated[name] = {'ถามว่า': triggers, 'ค้นหา': terms}
+        updated[name] = {'ความหมาย': meaning, 'ถามว่า': triggers, 'ค้นหา': terms}
         try:
             topics.clear(); topics.update(search_terms.save(updated))
             on_saved()

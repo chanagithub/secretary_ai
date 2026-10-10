@@ -220,6 +220,57 @@ def _recover_pseudo_call(text):
     return None
 
 
+_DATE_MARKERS = (
+    'วันนี้', 'พรุ่งนี้', 'มะรืน', 'เมื่อวาน', 'คืนนี้', 'พรุ่งนี้', 'สัปดาห์หน้า',
+    'เดือนหน้า', 'เดือนที่แล้ว', 'ปีหน้า', 'ปีที่แล้ว', 'วันจันทร์', 'วันอังคาร',
+    'วันพุธ', 'วันพฤหัส', 'วันศุกร์', 'วันเสาร์', 'วันอาทิตย์', 'จันทร์หน้า',
+    'อังคารหน้า', 'พุธหน้า', 'พฤหัสหน้', 'ศุกร์หน้า', 'เสาร์หน้า', 'อาทิตย์หน้า',
+    'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม',
+    'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม', 'ม.ค.', 'ก.พ.',
+    'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+)
+
+
+def _has_explicit_date(text):
+    if re.search(r'\b20\d{2}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b', text):
+        return True
+    if re.search(r'วันที่\s*\d{1,2}', text):
+        return True
+    return any(word in text for word in _DATE_MARKERS)
+
+
+def _has_explicit_time(text):
+    return bool(re.search(r'(?<!\d)\d{1,2}(?:[:.]\d{2})(?!\d)', text)
+                or any(word in text for word in (
+                    'โมง', 'ทุ่ม', 'ตี', 'เที่ยง', 'บ่าย', 'เช้า', 'เย็น', 'ค่ำ')))
+
+
+def _correct_date_omitted_create(text, calls):
+    """เวลาที่ระบุโดยไม่มีวันให้เป็นวันนี้ถ้ายังไม่ผ่าน; ถ้าผ่านแล้วถาม ไม่เลื่อนไปพรุ่งนี้เอง"""
+    if _has_explicit_date(text) or not _has_explicit_time(text):
+        return None
+    for call in calls or []:
+        if call.get('name') != 'create_reminder':
+            continue
+        args = call.get('arguments') or {}
+        raw = str(args.get('due_date') or '').strip()
+        due = None
+        for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M:%S'):
+            try:
+                due = datetime.datetime.strptime(raw, fmt)
+                break
+            except ValueError:
+                pass
+        if due is None:
+            continue
+        now = datetime.datetime.now()
+        due_today = now.replace(hour=due.hour, minute=due.minute, second=0, microsecond=0)
+        if due_today <= now:
+            return 'เวลาที่ระบุวันนี้ผ่านไปแล้วครับ หมายถึงวันนี้หรือพรุ่งนี้ครับ?'
+        args['due_date'] = due_today.strftime('%Y-%m-%d %H:%M')
+    return None
+
+
 def ask_ai(sent_text, on_chunk, token, model, history):
     """คืน (text, tool_calls) ถ้ามีปัญหาจะ raise ai_client.AIError"""
     # คำถามค้นนัดและคำตอบต่อ ให้โค้ดตัดสินเอง ไม่พึ่งการเลือกเครื่องมือของโมเดลเล็ก
@@ -240,10 +291,18 @@ def ask_ai(sent_text, on_chunk, token, model, history):
         recovered = _recover_pseudo_call(text)
         debug_log('flow: pseudo tool-call text, recovered=%s' % bool(recovered))
         if recovered:
+            question = _correct_date_omitted_create(sent_text, [recovered])
+            if question:
+                on_chunk(question)
+                return question, []
             return '', [recovered]
         # app_ui ใช้ข้อความที่สะสมจาก on_chunk เมื่อไม่มี tool call จึงส่งเป็น "ข้อความแจ้ง" แทน
         return '', [{'id': None, 'name': '_note', 'local_note': _PSEUDO_FALLBACK,
                      'arguments': {}}]
+    question = _correct_date_omitted_create(sent_text, calls)
+    if question:
+        on_chunk(question)
+        return question, []
     return text, calls
 
 # ---------- 3) ตรวจค่า + ยืนยัน + บันทึก ----------
