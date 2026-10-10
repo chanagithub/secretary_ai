@@ -68,11 +68,14 @@ class _Popup(ui.View):
         return action
 
     def _close(self):
-        if not hasattr(self, '_is_closing'):
-            self._is_closing = True
-            self.remove_from_superview()
-        if self.superview:
-            self.superview.remove_subview(self)
+        # ui.View ของ Pythonista ไม่มี remove_from_superview (ดู AttributeError ที่ผู้ใช้ส่งมา)
+        # จึงถอดผ่าน superview.remove_subview เท่านั้น และกันปิดซ้ำ
+        if getattr(self, '_is_closing', False):
+            return
+        self._is_closing = True
+        parent = self.superview
+        if parent is not None:
+            parent.remove_subview(self)
 
     def layout(self):
         pad, bh, gap = self.PAD, self.BTN_H, self.GAP
