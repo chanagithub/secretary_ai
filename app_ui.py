@@ -264,6 +264,12 @@ class MainView(ui.View):
 
     def begin_request(self, text):
         """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
+        local_list = assistant_flow.local_list_action(text, self._turns)
+        if local_list is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            self._run_actions('', [local_list])
+            return
         local_action = assistant_flow.local_reminder_action(
             text, self._turns, self._reminder_snapshot)
         if local_action is not None:

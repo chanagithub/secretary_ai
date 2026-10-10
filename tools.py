@@ -212,15 +212,22 @@ def validate_list_reminders(arguments):
         raise ToolValidationError('สถานะรายการไม่ถูกต้อง')
     if month_text:
         try:
-            start = datetime.datetime.strptime(month_text, '%Y-%m').date().replace(day=1)
+            year, month = [int(part) for part in month_text.split('-', 1)]
+            if year >= 2400:  # AI อาจส่งปี พ.ศ. มา แม้ system prompt ระบุ ค.ศ.
+                year -= 543
+            start = datetime.date(year, month, 1)
         except ValueError:
             raise ToolValidationError('เดือนต้องอยู่ในรูปแบบ YYYY-MM')
         if start.month == 12:
             end = start.replace(year=start.year + 1, month=1)
         else:
             end = start.replace(month=start.month + 1)
+        if abs((start - datetime.date.today().replace(day=1)).days) > 730:
+            raise ToolValidationError('เดือนที่ขออยู่ไกลจากปัจจุบันเกินไป กรุณาตรวจสอบปี')
+        month_names = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                       'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']
         return {'start': start, 'end': end, 'status': status,
-                'label': '%04d-%02d' % (start.year, start.month)}
+                'label': '%s %d' % (month_names[start.month], start.year), 'monthly': True}
 
     text = (arguments.get('date') or '').strip()
     if not text:
@@ -236,7 +243,7 @@ def validate_list_reminders(arguments):
             'วันที่ที่ตีความได้ (%s) ห่างจากวันนี้ผิดปกติ กรุณาตรวจสอบอีกครั้ง'
             % day.strftime('%d/%m/%Y'))
     return {'start': day, 'end': day + datetime.timedelta(days=1),
-            'status': status, 'label': format_day_text(day)}
+            'status': status, 'label': format_day_text(day), 'monthly': False}
 
 
 def format_day_text(day):

@@ -11,6 +11,7 @@
 ไฟล์นี้ไม่ผูกกับหน้าจอหลักโดยตรง: ใช้ host.show_overlay(overlay) เพื่อแสดงป๊อปอัป
 เท่านั้น
 """
+import datetime
 import ui
 import re
 import ai_client
@@ -88,6 +89,78 @@ def local_reminder_action(text, turns, snapshot):
         return {'kind': 'delete_reminder', 'item': item}
     if any(word in context for word in ('เสร็จ', 'ยกเลิก', 'ทำเครื่องหมาย')):
         return {'kind': 'complete_reminder', 'item': item}
+    return None
+
+
+def local_list_action(text, turns=None):
+    """แปลงคำขอดูรายการรายวัน/รายเดือนด้วยโค้ด เพื่อกัน AI แปลงเดือนหรือปีผิด"""
+    lower = text.lower()
+    list_words = ('ลิสต์', 'รายการ', 'ต้องทำ', 'ทำอะไร', 'เตือน', 'งาน', 'reminder')
+    month_words = ('มกราคม', 'ม.ค.', 'กุมภาพันธ์', 'ก.พ.', 'มีนาคม', 'มี.ค.', 'เมษายน', 'เม.ย.',
+                   'พฤษภาคม', 'พ.ค.', 'มิถุนายน', 'มิ.ย.', 'กรกฎาคม', 'ก.ค.', 'สิงหาคม', 'ส.ค.',
+                   'กันยายน', 'ก.ย.', 'ตุลาคม', 'ต.ค.', 'พฤศจิกายน', 'พ.ย.', 'ธันวาคม', 'ธ.ค.')
+    has_period = any(word in text for word in ('เดือนนี้', 'เดือนหน้า', 'เดือนถัดไป')) or any(word in text for word in month_words)
+    has_list_request = any(word in lower for word in list_words)
+    has_mutation_request = any(word in text for word in ('เลื่อน', 'เปลี่ยนเวลา', 'เปลี่ยนวัน', 'ยกเลิก', 'ลบทิ้ง', 'ลบข้อ'))
+    if not has_list_request:
+        prior_list_request = any(
+            any(word in str(turn.get('user') or '').lower() for word in list_words)
+            for turn in (turns or [])[-6:])
+        if not (has_period and prior_list_request) or has_mutation_request:
+            return None
+    completed = any(word in lower for word in ('เสร็จ', 'ทำแล้ว', 'completed'))
+    status = 'completed' if completed else ('all' if 'ทั้งหมด' in lower else 'incomplete')
+    now = datetime.date.today()
+    if 'เดือนนี้' in text or 'เดือนนี้' in lower:
+        month = '%04d-%02d' % (now.year, now.month)
+    elif 'เดือนหน้า' in text or 'เดือนถัดไป' in text:
+        next_month = (now.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+        month = '%04d-%02d' % (next_month.year, next_month.month)
+    else:
+        month_names = {
+            'มกราคม': 1, 'ม.ค.': 1, 'ม.ค': 1,
+            'กุมภาพันธ์': 2, 'ก.พ.': 2, 'ก.พ': 2,
+            'มีนาคม': 3, 'มี.ค.': 3, 'มี.ค': 3,
+            'เมษายน': 4, 'เม.ย.': 4, 'เม.ย': 4,
+            'พฤษภาคม': 5, 'พ.ค.': 5, 'พ.ค': 5,
+            'มิถุนายน': 6, 'มิ.ย.': 6, 'มิ.ย': 6,
+            'กรกฎาคม': 7, 'ก.ค.': 7, 'ก.ค': 7,
+            'สิงหาคม': 8, 'ส.ค.': 8, 'ส.ค': 8,
+            'กันยายน': 9, 'ก.ย.': 9, 'ก.ย': 9,
+            'ตุลาคม': 10, 'ต.ค.': 10, 'ต.ค': 10,
+            'พฤศจิกายน': 11, 'พ.ย.': 11, 'พ.ย': 11,
+            'ธันวาคม': 12, 'ธ.ค.': 12, 'ธ.ค': 12,
+        }
+        month_number = None
+        for name in sorted(month_names, key=len, reverse=True):
+            if name in text:
+                month_number = month_names[name]
+                after = text.split(name, 1)[1]
+                year_match = re.search(r'\b(\d{4})\b', after)
+                year = int(year_match.group(1)) if year_match else now.year
+                if year >= 2400:
+                    year -= 543
+                month = '%04d-%02d' % (year, month_number)
+                break
+        else:
+            month = None
+    if 'เดือนนี้' in text or 'เดือนหน้า' in text or 'เดือนถัดไป' in text or month is not None:
+        try:
+            period = tools.validate_list_reminders({'month': month, 'status': status})
+        except tools.ToolValidationError as e:
+            return {'kind': 'note', 'text': str(e)}
+        return {'kind': 'list', 'period': period}
+    if any(word in text for word in ('วันนี้', 'พรุ่งนี้', 'มะรืน')):
+        day = now
+        if 'พรุ่งนี้' in text:
+            day += datetime.timedelta(days=1)
+        elif 'มะรืน' in text:
+            day += datetime.timedelta(days=2)
+        try:
+            period = tools.validate_list_reminders({'date': day.strftime('%Y-%m-%d'), 'status': status})
+        except tools.ToolValidationError as e:
+            return {'kind': 'note', 'text': str(e)}
+        return {'kind': 'list', 'period': period}
     return None
 
 # ---------- 2) คุยกับ AI ----------
@@ -225,7 +298,8 @@ class _ActionRunner:
             lines = ['รายการเตือน%s ช่วง %s:' % (status_text, period['label'])]
             for i, item in enumerate(snapshot, 1):
                 clock = 'ไม่ระบุเวลา' if item['due'].hour == 0 and item['due'].minute == 0 else item['due'].strftime('%H:%M')
-                lines.append('%d. %s — %s' % (i, clock, item['title']))
+                date_part = item['due'].strftime('%d/%m/%Y ') if period.get('monthly') else ''
+                lines.append('%d. %s%s — %s' % (i, date_part, clock, item['title']))
             lines.append('เลือกหมายเลขเพื่อเลื่อนนัด ทำเครื่องหมายว่าเสร็จ/ยกเลิก หรือลบทิ้งได้')
             self.lines.append('\n'.join(lines))
         self.step()
