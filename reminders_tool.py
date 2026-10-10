@@ -6,8 +6,8 @@
 อ้างอิง: https://omz-software.com/pythonista/docs/ios/reminders.html
 
 การออกแบบ:
-- รีมายเดอร์ที่สร้างจากที่นี่ ทั้งหมดจะอยู่ในลิสต์ (Calendar) ชื่อ "เลขา AI"
-  แยกจากลิสต์เดิมของผู้ใช้ เพื่อให้ช่วงทดสอบลบ/ตรวจสอบง่าย ไม่ปนของจริง
+- รายการที่สร้างจากแอปยังบันทึกในลิสต์ "เลขา AI"
+- การอ่านรายการใช้ทุกลิสต์ใน Reminders เพื่อให้ค้นนัดเดิมของผู้ใช้ได้ด้วย
 """
 
 import datetime
@@ -137,12 +137,12 @@ def _naive(d):
 
 
 def list_reminders_on(day):
-    """งานที่ยังไม่เสร็จของวัน 'day' (datetime.date) ในลิสต์ 'เลขา AI' เท่านั้น
+    """งานที่ยังไม่เสร็จของวัน 'day' (datetime.date) จากทุกลิสต์ใน Reminders
 
     คืนค่า: list ของ (due_date: datetime, reminder) เรียงตามเวลา
     """
     items = []
-    for r in reminders.get_reminders(calendar=get_ai_calendar(), completed=False):
+    for r in reminders.get_reminders(completed=False):
         if r.due_date is None:
             continue
         due = _naive(r.due_date)
@@ -153,10 +153,10 @@ def list_reminders_on(day):
 
 
 def list_reminders_between(start, end, status='incomplete'):
-    """ดึงรายการในช่วง [start, end) ตามสถานะในลิสต์ AI"""
+    """ดึงรายการจากทุกลิสต์ในช่วง [start, end) ตามสถานะที่ระบุ"""
     completed = False if status == 'incomplete' else True if status == 'completed' else None
     items = []
-    for r in reminders.get_reminders(calendar=get_ai_calendar(), completed=completed):
+    for r in reminders.get_reminders(completed=completed):
         if r.due_date is None:
             continue
         due = _naive(r.due_date)
