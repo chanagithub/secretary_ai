@@ -64,12 +64,8 @@ _PATTERNS = {
 }
 
 _QUESTION_WORDS = ('วันไหน', 'เมื่อไหร่', 'เมื่อไร', 'เมื่อใด', 'วันอะไร', 'ตอนไหน', 'กี่โมง')
-_PAST_WORDS = ('ที่ผ่านมา', 'ที่ผ่านไปแล้ว', 'ย้อนหลัง', 'ที่เสร็จแล้ว', 'ได้รับแล้ว',
-               'ที่ได้รับ', 'จ่ายแล้ว', 'ในอดีต', 'ปีที่แล้ว', 'เดือนที่แล้ว', 'ปีก่อน',
-               'ครั้งที่แล้ว', 'ครั้งก่อน')
-_ALL_WORDS = ('ด้วย', 'ทั้งหมด', 'รวม')
-_OPEN_WORDS = ('ยังไม่เสร็จ', 'ไม่เอาที่ผ่านมา', 'ไม่รวมที่ผ่านมา', 'ไม่เอาที่เสร็จ',
-               'เฉพาะอนาคต', 'เฉพาะที่จะถึง', 'ที่ยังไม่ถึง')
+def _time_words(key):
+    return tuple(search_terms.load_when_words().get(key, []))
 
 _LAST = {'topics': [], 'keywords': None, 'ts': 0.0}
 _LAST_TTL = 20 * 60  # วินาที: ตอบต่อได้ภายใน 20 นาทีหลังค้นครั้งล่าสุด
@@ -121,17 +117,37 @@ def _is_question(text):
 
 
 def _when_from_text(text):
-    if any(w in text for w in _OPEN_WORDS):
+    if any(w in text for w in _time_words('upcoming')):
         return 'upcoming'
-    if any(w in text for w in _PAST_WORDS):
-        return 'all' if any(w in text for w in _ALL_WORDS) else 'past'
+    if _period_from_text(text):
+        return 'past'
+    if any(w in text for w in _time_words('past')):
+        return 'all' if any(w in text for w in _time_words('all')) else 'past'
     return 'upcoming'
+
+
+def _period_from_text(text):
+    today = datetime.date.today()
+    words = search_terms.load_when_words()
+    if any(w in text for w in words.get('last_month', [])):
+        first_this_month = today.replace(day=1)
+        last_month_end = first_this_month
+        last_month_start = (first_this_month - datetime.timedelta(days=1)).replace(day=1)
+        return {'start': last_month_start.isoformat(), 'end': last_month_end.isoformat(),
+                'label': last_month_start.strftime('%m/%Y')}
+    if any(w in text for w in words.get('last_year', [])):
+        start = datetime.date(today.year - 1, 1, 1)
+        end = datetime.date(today.year, 1, 1)
+        return {'start': start.isoformat(), 'end': end.isoformat(),
+                'label': str(today.year - 1)}
+    return None
 
 
 def _remember(action):
     _LAST['topics'] = list(action.get('topics') or [])
     _LAST['keywords'] = list(action['keywords'])
     _LAST['ts'] = time.time()
+    _LAST['period'] = action.get('period')
 
 
 def _last_search(turns):
@@ -150,19 +166,26 @@ def _last_search(turns):
 
 def local_search_action(text, turns=None):
     """ตรวจเจตนาค้นด้วยโค้ด (ไม่พึ่ง AI) คืน action หรือ None"""
-    only_open = any(w in text for w in _OPEN_WORDS)
-    past = any(w in text for w in _PAST_WORDS)
+    only_open = any(w in text for w in _time_words('upcoming'))
+    period = _period_from_text(text)
+    past = (any(w in text for w in _time_words('past')) or period is not None)
     when = _when_from_text(text)
     names = match_topics(text)
     terms = topic_terms(names)
     if terms and (_is_question(text) or past or only_open):
-        return {'kind': 'search', 'topics': names, 'keywords': terms, 'when': when}
+        action = {'kind': 'search', 'topics': names, 'keywords': terms, 'when': when}
+        if period:
+            action['period'] = period
+        return action
     # ตอบต่อสั้น ๆ เช่น "เฉพาะที่ยังไม่เสร็จ" / "ดูที่ผ่านมาแล้วด้วย"
     if not terms and len(text.strip()) <= 60 and (only_open or past):
         last_names, last_terms = _last_search(turns)
         if last_terms:
-            return {'kind': 'search', 'topics': last_names, 'keywords': last_terms,
-                    'when': when}
+            action = {'kind': 'search', 'topics': last_names, 'keywords': last_terms,
+                      'when': when}
+            if period:
+                action['period'] = period
+            return action
     return None
 
 
@@ -199,7 +222,7 @@ def _naive(d):
     return d
 
 
-def search_reminders(keywords, when='upcoming'):
+def search_reminders(keywords, when='upcoming', period=None):
     """คืน (มีวัน, ไม่มีวัน) เป็น list ของ dict จากทุกลิสต์ เรียงตามโหมด"""
     import reminders  # โมดูลของ Pythonista (import ตอนใช้ เพื่อทดสอบนอกเครื่องได้)
     today = datetime.date.today()
@@ -216,10 +239,12 @@ def search_reminders(keywords, when='upcoming'):
         item = {'title': r.title or '(ไม่มีชื่อ)', 'list': list_name,
                 'completed': done, 'due': None}
         if r.due_date is None:
-            if when != 'past' or done:
+            if not period and (when != 'past' or done):
                 undated.append(item)
             continue
         due = _naive(r.due_date)
+        if period and not (period['start'] <= due.date().isoformat() < period['end']):
+            continue
         if when == 'upcoming' and due.date() < today:
             continue
         if when == 'past' and not (due.date() < today or done):
@@ -268,10 +293,14 @@ def run_search(action):
     _remember(action)
     when = action.get('when', 'upcoming')
     try:
-        dated, undated = search_reminders(action['keywords'], when)
+        dated, undated = search_reminders(action['keywords'], when, action.get('period'))
     except Exception as e:
         return 'ค้นรายการเตือนไม่สำเร็จ: %s' % e
     text = format_results(dated, undated, action['keywords'], when, action.get('topics'))
+    if action.get('period'):
+        period = action['period']
+        text = text.replace(' (%s)' % _SCOPE[when][0],
+                            ' (%s %s)' % (_SCOPE[when][0], period['label']))
     if search_terms.LOAD_ERROR:
         text += '\n(หมายเหตุ: %s)' % search_terms.LOAD_ERROR
     return text

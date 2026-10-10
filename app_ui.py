@@ -13,6 +13,7 @@ import console
 import config
 import ai_client
 import assistant_flow
+import search_terms
 from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
 from overlays import ChoiceOverlay
 from debug_log import log as debug_log
@@ -79,6 +80,7 @@ class MainView(ui.View):
         self.add_subview(self.output)
 
         self.right_button_items = [
+            ui.ButtonItem(title='คำค้น', action=self.show_search_terms),
             ui.ButtonItem(title='แชทเก่า', action=self.show_chats),
             ui.ButtonItem(title='เริ่มใหม่', action=self.new_chat)]
 
@@ -96,6 +98,115 @@ class MainView(ui.View):
 
     def refresh_model_button(self):
         self.model_btn.title = 'โมเดล: %s  ▾' % config.get_current_model()
+
+    # ---------- พจนานุกรมคำค้น Reminder ----------
+    def show_search_terms(self, sender):
+        if self._busy_warning():
+            return
+        topics = search_terms.load()
+        table = ui.TableView()
+        table.name = 'พจนานุกรมคำค้น'
+        table.row_height = 58
+
+        def refresh():
+            source.items[:] = [
+                {'title': name, 'subtitle': 'ถามว่า: %s' % ', '.join(body['triggers'])}
+                for name, body in topics.items()]
+            table.reload()
+
+        def on_pick(ds_sender):
+            row = ds_sender.selected_row
+            if isinstance(row, tuple):
+                row = row[1]
+            if row is None or row < 0 or row >= len(source.items):
+                return
+            name = source.items[row]['title']
+            buttons = ['แก้ไข', 'ลบ', 'ปิด']
+            try:
+                choice = console.alert(name, 'เลือกจัดการหัวข้อนี้', *buttons)
+            except KeyboardInterrupt:
+                return
+            if choice == 'แก้ไข':
+                self._edit_search_topic(topics, name, refresh)
+            elif choice == 'ลบ':
+                try:
+                    confirm = console.alert('ลบหัวข้อ?', 'ลบ "%s" และคำค้นทั้งหมด' % name,
+                                            'ลบ', 'ยกเลิก')
+                except KeyboardInterrupt:
+                    return
+                if confirm == 'ลบ':
+                    updated = dict(topics)
+                    updated.pop(name, None)
+                    try:
+                        topics.clear(); topics.update(search_terms.save(updated))
+                        refresh()
+                        console.hud_alert('ลบหัวข้อแล้ว', 'success', 1.2)
+                    except (ValueError, OSError) as e:
+                        console.hud_alert(str(e), 'error', 2)
+
+        def on_add(btn):
+            self._edit_search_topic(topics, None, refresh)
+
+        def on_time_words(btn):
+            self._edit_search_time_words(topics)
+
+        source = ui.ListDataSource([])
+        source.action = on_pick
+        table.data_source = source
+        table.delegate = source
+        table.right_button_items = [
+            ui.ButtonItem(title='คำบอกเวลา', action=on_time_words),
+            ui.ButtonItem(title='+ เพิ่ม', action=on_add)]
+        refresh()
+        table.present('sheet')
+
+    def _edit_search_topic(self, topics, old_name, on_saved):
+        old = topics.get(old_name, {}) if old_name else {}
+        try:
+            name = dialogs.input_alert('ชื่อหัวข้อ', 'เช่น หาหมอ, สังสรรค์, ปันผล',
+                                       old_name or '', 'ต่อไป').strip()
+            if not name:
+                return
+            if name in topics and name != old_name:
+                console.hud_alert('มีหัวข้อนี้แล้ว เลือกชื่ออื่น', 'error', 2)
+                return
+            triggers = dialogs.input_alert(
+                'คำที่ผู้ใช้อาจถาม', 'คั่นแต่ละคำด้วยจุลภาค',
+                ', '.join(old.get('triggers', [])), 'ต่อไป')
+            terms = dialogs.input_alert(
+                'คำที่ใช้ค้นใน Reminder', 'คั่นแต่ละคำด้วยจุลภาค',
+                ', '.join(old.get('terms', [])), 'บันทึก')
+        except KeyboardInterrupt:
+            return
+        updated = dict(topics)
+        if old_name and old_name != name:
+            updated.pop(old_name, None)
+        updated[name] = {'ถามว่า': triggers, 'ค้นหา': terms}
+        try:
+            topics.clear(); topics.update(search_terms.save(updated))
+            on_saved()
+            console.hud_alert('บันทึกหัวข้อแล้ว', 'success', 1.2)
+        except (ValueError, OSError) as e:
+            console.hud_alert(str(e), 'error', 2)
+
+    def _edit_search_time_words(self, topics):
+        words = search_terms.load_when_words()
+        labels = [('past', 'คำที่หมายถึงรายการที่ผ่านมา/เสร็จแล้ว'),
+                  ('last_month', 'คำที่หมายถึงช่วงเดือนก่อน'),
+                  ('last_year', 'คำที่หมายถึงช่วงปีที่แล้ว'),
+                  ('all', 'คำที่ขอดูทั้งหมด'),
+                  ('upcoming', 'คำที่ขอดูเฉพาะรายการที่ยังไม่ถึง')]
+        try:
+            for key, title in labels:
+                words[key] = dialogs.input_alert(
+                    title, 'คั่นแต่ละคำด้วยจุลภาค', ', '.join(words[key]), 'ต่อไป')
+        except KeyboardInterrupt:
+            return
+        try:
+            search_terms.save(topics, words)
+            console.hud_alert('บันทึกคำบอกเวลาแล้ว', 'success', 1.2)
+        except (ValueError, OSError) as e:
+            console.hud_alert(str(e), 'error', 2)
 
     # ---------- เลือก/เพิ่มโมเดล ----------
     def _picker_items(self):

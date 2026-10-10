@@ -68,6 +68,16 @@ DEFAULT_TOPICS = {
     },
 }
 
+DEFAULT_WHEN_WORDS = {
+    'past': ['ที่ผ่านมา', 'ที่ผ่านไปแล้ว', 'ย้อนหลัง', 'ที่เสร็จแล้ว', 'ได้รับแล้ว',
+             'ที่ได้รับ', 'จ่ายแล้ว', 'ไปแล้ว', 'ในอดีต', 'ครั้งที่แล้ว', 'ครั้งก่อน'],
+    'last_month': ['เดือนที่แล้ว', 'เดือนก่อน'],
+    'last_year': ['ปีที่แล้ว', 'ปีก่อน'],
+    'all': ['ด้วย', 'ทั้งหมด', 'รวม'],
+    'upcoming': ['ยังไม่เสร็จ', 'ไม่เอาที่ผ่านมา', 'ไม่รวมที่ผ่านมา', 'ไม่เอาที่เสร็จ',
+                 'เฉพาะอนาคต', 'เฉพาะที่จะถึง', 'ที่ยังไม่ถึง'],
+}
+
 LOAD_ERROR = None  # ข้อความเมื่อไฟล์เสียหาย (ใช้ค่าเริ่มต้นแทน) ไม่เสียหาย = None
 
 
@@ -77,6 +87,10 @@ def path():
 
 def defaults():
     return copy.deepcopy(DEFAULT_TOPICS)
+
+
+def default_when_words():
+    return copy.deepcopy(DEFAULT_WHEN_WORDS)
 
 
 def clean_words(raw):
@@ -107,14 +121,16 @@ def validate(topics):
             raise ValueError('ชื่อหัวข้อซ้ำ: %s' % name)
         if not isinstance(body, dict):
             raise ValueError('หัวข้อ "%s" รูปแบบไม่ถูกต้อง' % name)
-        terms = clean_words(body.get('terms'))
+        # รองรับทั้งชื่อฟิลด์เดิมและรูปแบบภาษาไทยที่จัดการจากเมนู
+        terms = clean_words(body.get('terms', body.get('ค้นหา')))
         if not terms:
             raise ValueError('หัวข้อ "%s" ต้องมีคำค้นอย่างน้อย 1 คำ' % name)
-        result[name] = {'triggers': clean_words(body.get('triggers')), 'terms': terms}
+        triggers = clean_words(body.get('triggers', body.get('ถามว่า')))
+        result[name] = {'triggers': triggers, 'terms': terms}
     return result
 
 
-def save(topics):
+def save(topics, when_words=None):
     """บันทึกลงไฟล์ (สำรองไฟล์เดิมเป็น .bak ก่อน เขียนผ่านไฟล์ชั่วคราวกันไฟล์เสีย) คืนชุดที่ตรวจแล้ว"""
     global LOAD_ERROR
     clean = validate(topics)
@@ -126,7 +142,12 @@ def save(topics):
             pass
     tmp = target + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump({'version': 1, 'topics': clean}, f, ensure_ascii=False, indent=2)
+        thai_topics = {name: {'ถามว่า': body['triggers'], 'ค้นหา': body['terms']}
+                       for name, body in clean.items()}
+        data = {'version': 2, 'topics': thai_topics,
+                'ช่วงเวลา': validate_when_words(
+                    when_words if when_words is not None else _WHEN_WORDS)}
+        json.dump(data, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, target)
@@ -139,6 +160,7 @@ def load():
     global LOAD_ERROR
     target = path()
     if not os.path.exists(target):
+        _set_when_words(default_when_words())
         topics = defaults()
         try:
             save(topics)
@@ -148,9 +170,16 @@ def load():
     try:
         with open(target, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        topics = validate(data.get('topics') if isinstance(data, dict) else None)
+        if isinstance(data, dict) and 'topics' in data:
+            raw = data.get('topics')
+        else:
+            raw = data  # รองรับ JSON แบบหัวข้ออยู่ชั้นบนสุด
+        topics = validate(raw)
+        if isinstance(data, dict) and 'ช่วงเวลา' in data:
+            _set_when_words(validate_when_words(data['ช่วงเวลา']))
     except (OSError, ValueError, AttributeError) as e:
         LOAD_ERROR = 'อ่านไฟล์ search_terms.json ไม่ได้ จึงใช้ชุดคำเริ่มต้นแทน (%s)' % e
+        _set_when_words(default_when_words())
         return defaults()
     LOAD_ERROR = None
     return topics
@@ -163,3 +192,25 @@ def reset_defaults():
 
 def topic_names():
     return list(load().keys())
+
+
+_WHEN_WORDS = copy.deepcopy(DEFAULT_WHEN_WORDS)
+
+
+def _set_when_words(words):
+    global _WHEN_WORDS
+    _WHEN_WORDS = copy.deepcopy(words)
+
+
+def validate_when_words(words):
+    if not isinstance(words, dict):
+        raise ValueError('รูปแบบคำบอกช่วงเวลาไม่ถูกต้อง')
+    result = {}
+    for key in DEFAULT_WHEN_WORDS:
+        result[key] = clean_words(words.get(key, DEFAULT_WHEN_WORDS[key]))
+    return result
+
+
+def load_when_words():
+    load()
+    return copy.deepcopy(_WHEN_WORDS)
