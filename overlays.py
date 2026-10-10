@@ -6,6 +6,7 @@ ChoiceOverlay  = ให้เลือกตัวเลือกหนึ่ง
 ทั้งสองแบบปิดตัวเองก่อนเรียก callback เสมอ จึงเปิดป๊อปอัปถัดไปต่อใน callback ได้
 """
 import ui
+from debug_log import log as debug_log
 
 _BLUE = '#007aff'
 _GREEN = '#34c759'
@@ -57,14 +58,18 @@ class _Popup(ui.View):
             btn.background_color = bg
             btn.tint_color = fg
             btn.corner_radius = 10
-            btn.action = self._make_action(callback)
+            btn.action = self._make_action(callback, label)
             self.card.add_subview(btn)
             self._buttons.append(btn)
 
-    def _make_action(self, callback):
+    def _make_action(self, callback, label=''):
         def action(sender):
+            # [DEBUG] จดทีละขั้นเพื่อดูว่าล่มก่อน/หลังปิดป๊อปอัป (พฤติกรรมเดิมทุกอย่าง)
+            debug_log('popup: button "%s" action entered' % label)
             self._close()
+            debug_log('popup: _close returned')
             callback()
+            debug_log('popup: callback returned')
         return action
 
     def _close(self):
@@ -74,6 +79,7 @@ class _Popup(ui.View):
             return
         self._is_closing = True
         parent = self.superview
+        debug_log('popup: _close removing from parent=%s' % (parent is not None))
         if parent is not None:
             parent.remove_subview(self)
 
