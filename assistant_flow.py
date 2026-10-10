@@ -99,7 +99,9 @@ def local_list_action(text, turns=None):
     month_words = ('มกราคม', 'ม.ค.', 'กุมภาพันธ์', 'ก.พ.', 'มีนาคม', 'มี.ค.', 'เมษายน', 'เม.ย.',
                    'พฤษภาคม', 'พ.ค.', 'มิถุนายน', 'มิ.ย.', 'กรกฎาคม', 'ก.ค.', 'สิงหาคม', 'ส.ค.',
                    'กันยายน', 'ก.ย.', 'ตุลาคม', 'ต.ค.', 'พฤศจิกายน', 'พ.ย.', 'ธันวาคม', 'ธ.ค.')
-    has_period = any(word in text for word in ('เดือนนี้', 'เดือนหน้า', 'เดือนถัดไป')) or any(word in text for word in month_words)
+    weekday_words = ('จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์', 'อาทิตย์')
+    relative_period_words = ('เดือนนี้', 'เดือนหน้า', 'เดือนถัดไป', 'เดือนที่แล้ว', 'เดือนก่อน', 'เดือนที่ผ่าน')
+    has_period = any(word in text for word in relative_period_words) or any(word in text for word in month_words) or any(word in text for word in weekday_words) or any(word in text for word in ('วันนี้', 'พรุ่งนี้', 'มะรืน'))
     has_list_request = any(word in lower for word in list_words)
     has_mutation_request = any(word in text for word in ('เลื่อน', 'เปลี่ยนเวลา', 'เปลี่ยนวัน', 'ยกเลิก', 'ลบทิ้ง', 'ลบข้อ'))
     if not has_list_request:
@@ -108,14 +110,26 @@ def local_list_action(text, turns=None):
             for turn in (turns or [])[-6:])
         if not (has_period and prior_list_request) or has_mutation_request:
             return None
-    completed = any(word in lower for word in ('เสร็จ', 'ทำแล้ว', 'completed'))
+    completed = any(word in lower for word in ('เสร็จ', 'ทำแล้ว', 'completed', 'ยกเลิก', 'ทำอะไรมาบ้าง', 'ทำอะไรไปบ้าง'))
     status = 'completed' if completed else ('all' if 'ทั้งหมด' in lower else 'incomplete')
+    if not any(word in lower for word in ('เสร็จ', 'ทำแล้ว', 'completed', 'ยกเลิก', 'ทำอะไรมาบ้าง', 'ทำอะไรไปบ้าง', 'ทั้งหมด')):
+        for turn in reversed(turns or []):
+            prior = str(turn.get('user') or '').lower()
+            if any(word in prior for word in list_words):
+                if any(word in prior for word in ('เสร็จ', 'ทำแล้ว', 'completed', 'ยกเลิก', 'ทำอะไรมาบ้าง', 'ทำอะไรไปบ้าง')):
+                    status = 'completed'
+                elif 'ทั้งหมด' in prior:
+                    status = 'all'
+                break
     now = datetime.date.today()
     if 'เดือนนี้' in text or 'เดือนนี้' in lower:
         month = '%04d-%02d' % (now.year, now.month)
     elif 'เดือนหน้า' in text or 'เดือนถัดไป' in text:
         next_month = (now.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
         month = '%04d-%02d' % (next_month.year, next_month.month)
+    elif any(phrase in text for phrase in ('เดือนที่แล้ว', 'เดือนก่อน', 'เดือนที่ผ่าน')):
+        prev_month = now.replace(day=1) - datetime.timedelta(days=1)
+        month = '%04d-%02d' % (prev_month.year, prev_month.month)
     else:
         month_names = {
             'มกราคม': 1, 'ม.ค.': 1, 'ม.ค': 1,
@@ -144,7 +158,7 @@ def local_list_action(text, turns=None):
                 break
         else:
             month = None
-    if 'เดือนนี้' in text or 'เดือนหน้า' in text or 'เดือนถัดไป' in text or month is not None:
+    if any(phrase in text for phrase in relative_period_words) or month is not None:
         try:
             period = tools.validate_list_reminders({'month': month, 'status': status})
         except tools.ToolValidationError as e:
@@ -161,6 +175,19 @@ def local_list_action(text, turns=None):
         except tools.ToolValidationError as e:
             return {'kind': 'note', 'text': str(e)}
         return {'kind': 'list', 'period': period}
+    weekdays = {'จันทร์': 0, 'อังคาร': 1, 'พุธ': 2, 'พฤหัส': 3,
+                'ศุกร์': 4, 'เสาร์': 5, 'อาทิตย์': 6}
+    for name, target in weekdays.items():
+        if name in text:
+            offset = (target - now.weekday()) % 7
+            if offset == 0 and any(word in text for word in ('ที่จะถึง', 'หน้า', 'ถัดไป')):
+                offset = 7
+            day = now + datetime.timedelta(days=offset)
+            try:
+                period = tools.validate_list_reminders({'date': day.strftime('%Y-%m-%d'), 'status': status})
+            except tools.ToolValidationError as e:
+                return {'kind': 'note', 'text': str(e)}
+            return {'kind': 'list', 'period': period}
     return None
 
 # ---------- 2) คุยกับ AI ----------
