@@ -271,11 +271,95 @@ def _correct_date_omitted_create(text, calls):
     return None
 
 
+def _local_wake_alarm_action(text):
+    """จับคำสั่งปลุกที่ชัดเจนเอง เพื่อไม่ให้โมเดลเปลี่ยนเป็นคำสั่งค้นรายการ"""
+    if not any(word in text.lower() for word in ('ปลุก', 'นาฬิกาปลุก', 'alarm')):
+        return None
+    if any(phrase in text for phrase in ('ไม่ต้องปลุก', 'ไม่ต้องตั้งปลุก', 'ยกเลิกปลุก')):
+        return None
+
+    normalized = text.translate(str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789'))
+    hour = minute = None
+    match = re.search(r'(?<!\d)(\d{1,2})\s*[:.]\s*(\d{2})(?!\d)', normalized)
+    if match:
+        hour, minute = int(match.group(1)), int(match.group(2))
+        if hour > 23 or minute > 59:
+            return {'kind': 'note', 'text': 'เวลาไม่ถูกต้องครับ กรุณาบอกเวลาอีกครั้ง'}
+    elif 'เที่ยงคืน' in normalized:
+        hour, minute = 0, 0
+    elif 'เที่ยง' in normalized:
+        hour, minute = 12, 0
+    else:
+        match = re.search(r'ตี\s*(\d{1,2})', normalized)
+        if match:
+            hour, minute = int(match.group(1)), 0
+        else:
+            match = re.search(r'(\d{1,2})\s*ทุ่ม', normalized)
+            if match:
+                n = int(match.group(1))
+                if not 1 <= n <= 5:
+                    return {'kind': 'note', 'text': 'เวลาไม่ถูกต้องครับ กรุณาบอกเวลาอีกครั้ง'}
+                hour, minute = 18 + n, 0
+            else:
+                match = re.search(r'(?:บ่าย\s*)?(\d{1,2})\s*โมง\s*(เช้า|สาย|บ่าย|เย็น|ค่ำ|กลางคืน)?', normalized)
+                if match:
+                    n = int(match.group(1))
+                    part = match.group(2)
+                    if part == 'บ่าย':
+                        # เผื่อรูปแบบ "บ่าย 2 โมง"
+                        pass
+                    if part in ('เช้า', 'สาย'):
+                        hour = n
+                    elif part in ('เย็น', 'ค่ำ', 'กลางคืน'):
+                        hour = n if n >= 6 else n + 12
+                    elif 'บ่าย' in normalized[:match.start()]:
+                        hour = n + 12 if n < 12 else n
+                    elif n == 12:
+                        hour = 12
+                    else:
+                        return {'kind': 'note', 'text': 'หมายถึงกี่โมงครับ เช่น 6 โมงเช้า หรือ 6 โมงเย็น'}
+                    if not 0 <= hour <= 23:
+                        return {'kind': 'note', 'text': 'เวลาไม่ถูกต้องครับ กรุณาบอกเวลาอีกครั้ง'}
+                    minute = 0
+
+    if hour is None:
+        return {'kind': 'note', 'text': 'จะให้ปลุกกี่โมงครับ'}
+
+    today = datetime.date.today()
+    if 'มะรืน' in normalized:
+        day = today + datetime.timedelta(days=2)
+    elif 'พรุ่งนี้' in normalized:
+        day = today + datetime.timedelta(days=1)
+    elif any(word in normalized for word in ('วันนี้', 'คืนนี้', 'เช้านี้', 'เย็นนี้')):
+        day = today
+    else:
+        date_match = re.search(r'\b(20\d{2})-(\d{1,2})-(\d{1,2})\b', normalized)
+        if date_match:
+            try:
+                day = datetime.date(*(int(part) for part in date_match.groups()))
+            except ValueError:
+                return {'kind': 'note', 'text': 'วันที่ไม่ถูกต้องครับ กรุณาบอกวันอีกครั้ง'}
+        else:
+            return {'kind': 'note', 'text': 'จะให้ปลุกวันไหนครับ เช่น พรุ่งนี้'}
+
+    due = datetime.datetime.combine(day, datetime.time(hour, minute))
+    args = {'title': 'ปลุกผม', 'due_date': due.strftime('%Y-%m-%d %H:%M'),
+            'urgent_alarm': True}
+    return {'kind': 'tool', 'call': {'id': None, 'name': 'create_reminder',
+                                    'arguments': args}}
+
+
 def ask_ai(sent_text, on_chunk, token, model, history):
     """คืน (text, tool_calls) ถ้ามีปัญหาจะ raise ai_client.AIError"""
     # คำถามค้นนัดและคำตอบต่อ ให้โค้ดตัดสินเอง ไม่พึ่งการเลือกเครื่องมือของโมเดลเล็ก
     turns = [{'user': str(m.get('content') or '')}
              for m in (history or []) if m.get('role') == 'user']
+    wake = _local_wake_alarm_action(sent_text)
+    if wake:
+        if wake['kind'] == 'note':
+            return '', [{'id': None, 'name': '_note',
+                         'local_note': wake['text'], 'arguments': {}}]
+        return '', [wake['call']]
     local = reminder_search.local_search_action(sent_text, turns)
     if local:
         return '', [{'id': None, 'name': 'search_reminders',

@@ -204,6 +204,8 @@ def format_confirm_text(validated):
     else:
         date_text += ' (ไม่ระบุเวลา)'
     text = 'จะสร้างการเตือน: "%s"\nกำหนด: %s' % (validated['title'], date_text)
+    if validated.get('urgent_alarm'):
+        text += '\nชนิด: ปลุกด้วยเสียงฉุกเฉิน (Urgent)'
     if validated.get('notes'):
         text += '\nบันทึกเพิ่มเติม: %s' % validated['notes']
     return text
