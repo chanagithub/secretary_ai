@@ -12,6 +12,7 @@
 เท่านั้น
 """
 import ui
+import re
 import ai_client
 import date_guard
 import reminders_tool
@@ -39,6 +40,56 @@ def apply_choice(text, info, choice):
     """เติมวันที่จริงต่อท้ายคำสั่งก่อนส่งให้ AI"""
     return text + date_guard.clarify_text(info, choice)
 
+
+def local_reminder_action(text, turns, snapshot):
+    """จัดการคำสั่งสั้นที่ตามหลังคำถามหมายเลข โดยไม่ให้โมเดลตีความซ้ำ"""
+    words = {'หนึ่ง': 1, 'ที่หนึ่ง': 1, 'แรก': 1, 'สอง': 2, 'ที่สอง': 2,
+             'สาม': 3, 'ที่สาม': 3, 'สี่': 4, 'ที่สี่': 4, 'ห้า': 5,
+             'ที่ห้า': 5, 'หก': 6, 'เจ็ด': 7, 'แปด': 8, 'เก้า': 9, 'สิบ': 10}
+    number = None
+    match = re.search(r'(?:ข้อ|รายการที่|รายการ)\s*(\d+|หนึ่ง|ที่หนึ่ง|แรก|สอง|ที่สอง|สาม|ที่สาม|สี่|ที่สี่|ห้า|ที่ห้า|หก|เจ็ด|แปด|เก้า|สิบ)', text)
+    if match:
+        value = match.group(1)
+        number = int(value) if value.isdigit() else words[value]
+    elif text.strip() in ('หนึ่ง', 'ข้อหนึ่ง', 'ที่หนึ่ง', 'ข้อ 1', '1'):
+        number = 1
+    if number is None or number < 1 or number > len(snapshot):
+        return None
+
+    context = text
+    for turn in reversed(turns):
+        prior = str(turn.get('user') or '')
+        if any(word in prior for word in ('เลื่อน', 'เปลี่ยนเวลา', 'เปลี่ยนวัน', 'นัดใหม่', 'ทำเครื่องหมาย', 'ยกเลิก', 'ลบทิ้ง', 'ลบข้อ')):
+            context = prior + ' ' + context
+            break
+    item = snapshot[number - 1]
+    args = {'number': number}
+    if any(word in context for word in ('เลื่อน', 'เปลี่ยนเวลา', 'เปลี่ยนวัน', 'นัดใหม่')):
+        tm = re.search(r'(?<!\d)(\d{1,2})[.:](\d{2})(?!\d)', context)
+        if tm:
+            args['new_time'] = '%02d:%02d' % (int(tm.group(1)), int(tm.group(2)))
+        else:
+            thai_times = {'บ่ายโมง': '13:00', 'บ่ายหนึ่ง': '13:00', 'บ่ายสอง': '14:00',
+                          'บ่ายสาม': '15:00', 'บ่ายสี่': '16:00', 'ห้าโมงเย็น': '17:00',
+                          'หกโมงเย็น': '18:00', 'หนึ่งทุ่ม': '19:00', 'สองทุ่ม': '20:00'}
+            for phrase, value in thai_times.items():
+                if phrase in context:
+                    args['new_time'] = value
+                    break
+        day = re.search(r'\b(20\d{2}-\d{2}-\d{2})\b', context)
+        if day:
+            args['new_date'] = day.group(1)
+        try:
+            validated = tools.validate_reschedule(args, snapshot)
+        except tools.ToolValidationError as e:
+            return {'kind': 'note', 'text': str(e)}
+        return {'kind': 'reschedule', 'validated': validated}
+    if any(word in context for word in ('ลบทิ้ง', 'ลบข้อ', 'ลบรายการ')):
+        return {'kind': 'delete_reminder', 'item': item}
+    if any(word in context for word in ('เสร็จ', 'ยกเลิก', 'ทำเครื่องหมาย')):
+        return {'kind': 'complete_reminder', 'item': item}
+    return None
+
 # ---------- 2) คุยกับ AI ----------
 def ask_ai(sent_text, on_chunk, token, model, history):
     """คืน (text, tool_calls) ถ้ามีปัญหาจะ raise ai_client.AIError"""
@@ -59,7 +110,7 @@ def prepare_actions(tool_calls, host=None):
         args = call['arguments']
         if name == 'list_reminders':
             try:
-                actions.append({'kind': 'list', 'day': tools.validate_list_reminders(args)})
+                actions.append({'kind': 'list', 'period': tools.validate_list_reminders(args)})
             except tools.ToolValidationError as e:
                 actions.append({'kind': 'note', 'text': 'ตรวจค่าไม่ผ่าน: %s' % e})
             continue
@@ -135,7 +186,7 @@ class _ActionRunner:
 
         action = self.queue.pop(0)
         if action['kind'] == 'list':
-            self.show_list(action['day'])
+            self.show_list(action['period'])
             return
         if action['kind'] in ('reschedule', 'complete_reminder', 'delete_reminder'):
             self.current_action = action
@@ -154,9 +205,10 @@ class _ActionRunner:
         else:
             self.show_time_choice()
 
-    def show_list(self, day):
+    def show_list(self, period):
         try:
-            rows = reminders_tool.list_reminders_on(day)
+            rows = reminders_tool.list_reminders_between(
+                period['start'], period['end'], period['status'])
         except Exception as e:
             self.lines.append('อ่านรายการเตือนไม่สำเร็จ: %s' % e)
             self.step()
@@ -166,10 +218,11 @@ class _ActionRunner:
             snapshot.append({'due': due, 'reminder': reminder,
                              'title': reminder.title})
         self.host._reminder_snapshot = snapshot
+        status_text = {'incomplete': 'ที่ยังไม่เสร็จ', 'completed': 'ที่เสร็จแล้ว', 'all': 'ทั้งหมด'}[period['status']]
         if not snapshot:
-            self.lines.append('ไม่มีรายการเตือนที่ยังไม่เสร็จในวันที่ %s' % tools.format_day_text(day))
+            self.lines.append('ไม่มีรายการเตือน%sในช่วง %s' % (status_text, period['label']))
         else:
-            lines = ['รายการเตือนวันที่ %s:' % tools.format_day_text(day)]
+            lines = ['รายการเตือน%s ช่วง %s:' % (status_text, period['label'])]
             for i, item in enumerate(snapshot, 1):
                 clock = 'ไม่ระบุเวลา' if item['due'].hour == 0 and item['due'].minute == 0 else item['due'].strftime('%H:%M')
                 lines.append('%d. %s — %s' % (i, clock, item['title']))

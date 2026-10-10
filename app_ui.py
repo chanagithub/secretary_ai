@@ -37,6 +37,7 @@ class MainView(ui.View):
         self._action_runner = None
         self._keep_context = False  # True = รอบนี้ AI ถามเวลา ต้องจำไว้ให้รอบถัดไป
         self._reminder_snapshot = []  # หมายเลขรายการล่าสุดที่ผู้ใช้เห็น ใช้กับคำสั่งต่อเนื่อง
+        self._scroll_scheduled = False
 
         self.model_btn = ui.Button()
         self.model_btn.font = ('<system>', 14)
@@ -73,7 +74,8 @@ class MainView(ui.View):
 
         self.output = ui.TextView()
         self.output.editable = False
-        self.output.font = ('<system>', 16)
+        self.output.font = ('<system>', 18)
+        self.output.scroll_enabled = True
         self.add_subview(self.output)
 
         self.right_button_items = [
@@ -192,6 +194,9 @@ class MainView(ui.View):
         self.output.text = format_chat(turns)
         debug_log('ui: render set output.text done')
         self._scroll_to_bottom()
+        if not self._scroll_scheduled:
+            self._scroll_scheduled = True
+            ui.delay(self._scroll_after_layout, 0.15)
         debug_log('ui: render after _scroll_to_bottom')
         debug_log('ui: render end')
         
@@ -202,6 +207,11 @@ class MainView(ui.View):
             self.output.content_offset = (0, max(y, 0))
         except Exception:  # ถ้า TextView ไม่รองรับ ก็แค่ไม่เลื่อนอัตโนมัติ
             pass
+
+    def _scroll_after_layout(self):
+        self._scroll_scheduled = False
+        if self.output is not None:
+            self._scroll_to_bottom()
 
     def send(self, sender):
         # ระหว่างรอ AI ปุ่มนี้กลายเป็นปุ่ม "หยุด"
@@ -254,6 +264,13 @@ class MainView(ui.View):
 
     def begin_request(self, text):
         """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
+        local_action = assistant_flow.local_reminder_action(
+            text, self._turns, self._reminder_snapshot)
+        if local_action is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            self._run_actions('', [local_action])
+            return
         info = assistant_flow.find_ambiguous_weekday(text)
         if not info:
             self.start_request(text, text)
@@ -350,7 +367,9 @@ class MainView(ui.View):
             self._finish_turn(text, 'ok')
             self.input.text = ''
             return
-        self._run_actions(text, assistant_flow.prepare_actions(calls, self))
+        # เมื่อมี tool call ให้แอปเป็นผู้แสดงผลภาษาไทยจากผลจริงของเครื่องมือ
+        # ไม่แสดงข้อความอิสระที่โมเดลอาจส่งมาปน (เช่นคำอธิบายภาษาอังกฤษ)
+        self._run_actions('', assistant_flow.prepare_actions(calls, self))
 
     def _run_actions(self, ai_text, actions):
         """เริ่มลำดับยืนยัน/บันทึก โดยใช้เมธอดของ MainView เป็น callback"""

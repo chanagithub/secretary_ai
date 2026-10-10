@@ -64,8 +64,17 @@ LIST_REMINDERS_SCHEMA = {
                         'ตีความจากปฏิทินใน system prompt เสมอ เช่น "พรุ่งนี้" ให้แปลงเป็นวันที่จริง'
                     ),
                 },
+                'month': {
+                    'type': 'string',
+                    'description': 'เดือนที่ต้องการดู รูปแบบ YYYY-MM ใช้เมื่อผู้ใช้ขอรายการทั้งเดือน',
+                },
+                'status': {
+                    'type': 'string',
+                    'enum': ['incomplete', 'completed', 'all'],
+                    'description': 'สถานะรายการ: ยังไม่เสร็จ, เสร็จแล้ว หรือทั้งหมด',
+                },
             },
-            'required': ['date'],
+            'required': [],
         },
     },
 }
@@ -196,10 +205,23 @@ _MONTHS_TH = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค
 
 
 def validate_list_reminders(arguments):
-    """ตรวจวันที่ที่ AI ส่งมาสำหรับ list_reminders คืน datetime.date
+    """ตรวจช่วงวันที่และสถานะสำหรับ list_reminders"""
+    month_text = (arguments.get('month') or '').strip()
+    status = (arguments.get('status') or 'incomplete').strip().lower()
+    if status not in ('incomplete', 'completed', 'all'):
+        raise ToolValidationError('สถานะรายการไม่ถูกต้อง')
+    if month_text:
+        try:
+            start = datetime.datetime.strptime(month_text, '%Y-%m').date().replace(day=1)
+        except ValueError:
+            raise ToolValidationError('เดือนต้องอยู่ในรูปแบบ YYYY-MM')
+        if start.month == 12:
+            end = start.replace(year=start.year + 1, month=1)
+        else:
+            end = start.replace(month=start.month + 1)
+        return {'start': start, 'end': end, 'status': status,
+                'label': '%04d-%02d' % (start.year, start.month)}
 
-    ถ้าไม่ผ่าน raise ToolValidationError
-    """
     text = (arguments.get('date') or '').strip()
     if not text:
         raise ToolValidationError('AI ไม่ได้ระบุวันที่ที่ต้องการดู กรุณาบอกว่าจะดูงานของวันไหน')
@@ -213,7 +235,8 @@ def validate_list_reminders(arguments):
         raise ToolValidationError(
             'วันที่ที่ตีความได้ (%s) ห่างจากวันนี้ผิดปกติ กรุณาตรวจสอบอีกครั้ง'
             % day.strftime('%d/%m/%Y'))
-    return day
+    return {'start': day, 'end': day + datetime.timedelta(days=1),
+            'status': status, 'label': format_day_text(day)}
 
 
 def format_day_text(day):

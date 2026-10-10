@@ -152,6 +152,20 @@ def list_reminders_on(day):
     return items
 
 
+def list_reminders_between(start, end, status='incomplete'):
+    """ดึงรายการในช่วง [start, end) ตามสถานะในลิสต์ AI"""
+    completed = False if status == 'incomplete' else True if status == 'completed' else None
+    items = []
+    for r in reminders.get_reminders(calendar=get_ai_calendar(), completed=completed):
+        if r.due_date is None:
+            continue
+        due = _naive(r.due_date)
+        if start <= due.date() < end:
+            items.append((due, r))
+    items.sort(key=lambda x: x[0])
+    return items
+
+
 def mark_done(reminder):
     """ติ๊กว่าเสร็จแล้ว (ยังเหลืออยู่ในแอป Reminders ในหมวดที่เสร็จแล้ว กู้คืนได้)"""
     reminder.completed = True
