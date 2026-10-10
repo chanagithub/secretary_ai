@@ -359,12 +359,13 @@ def prepare_actions(tool_calls, host=None):
 
 def _save(validated):
     debug_log('flow: _save start title=%s' % validated.get('title'))
-    reminders_tool.create_reminder(
+    result = reminders_tool.create_reminder(
         title=validated['title'],
         due_date=validated['due_date'],
         notes=validated['notes'],
         has_time=validated.get('has_time', True))
     debug_log('flow: _save done')
+    return result
 
 class _ActionRunner:
     """เก็บ state ของงานและส่ง bound methods ให้ ui.delay/ปุ่ม"""
@@ -559,14 +560,18 @@ class _ActionRunner:
         # keep it on the runner when the confirmation is shown.
         validated = self.current_validated
         try:
-            _save(validated)
+            save_result = _save(validated)
         except Exception as e:
             debug_log('flow: save failed: %s' % e)
             self.lines.append('บันทึกไม่สำเร็จ: %s' % e)
         else:
             self.saved = True
-            self.lines.append('บันทึกการเตือนแล้ว: "%s" (ดูในแอป Reminders ลิสต์ "เลขา AI")'
-                              % validated['title'])
+            if save_result == 'shortcut':
+                self.lines.append('ส่งคำสั่งสร้าง Urgent Reminder แล้ว: "%s" กรุณาตรวจรายการในแอป Reminders'
+                                  % validated['title'])
+            else:
+                self.lines.append('บันทึกการเตือนแล้ว: "%s" (ดูในแอป Reminders ลิสต์ "เลขา AI")'
+                                  % validated['title'])
         debug_log('flow: do_ok calling step()')
         self.step()
 

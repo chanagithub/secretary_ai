@@ -11,10 +11,12 @@
 """
 
 import datetime
+import json
 import reminders
 from debug_log import log as debug_log
 
 AI_LIST_NAME = "เลขา AI"
+URGENT_SHORTCUT_NAME = "ทดลองสร้าง Urgent Reminder"
 
 
 def get_ai_calendar():
@@ -115,18 +117,44 @@ def create_reminder(title, due_date=None, notes=None,
               โมดูล reminders ของ Pythonista ทำแบบนี้ไม่ได้ (ส่งเป็น 00:00) จึงเขียนผ่าน EventKit
               ตรง ๆ (ทดสอบบน iPhone แล้วด้วย test_allday.py) ถ้าไม่สำเร็จจะ raise ไม่ย้อนไปใช้ 00:00
 
-    คืนค่า: reminders.Reminder object ที่บันทึกแล้ว (แบบไม่ระบุเวลาคืน None)
-    """
-    if calendar is None:
-        calendar = get_ai_calendar()
+    รายการที่มีเวลาจะส่งให้ Shortcut ซึ่งเปิด Urgent ไว้ ส่วนรายการ all-day
+    ยังคงสร้างผ่าน EventKit ตามเดิม
 
+    คืนค่า: 'shortcut' เมื่อส่งให้ Shortcut, reminders.Reminder object เมื่อสร้างตรง,
+    และ None สำหรับ all-day
+    """
     if due_date and not has_time:
+        if calendar is None:
+            calendar = get_ai_calendar()
         day = due_date.date() if isinstance(due_date, datetime.datetime) else due_date
         debug_log('reminders: saving all-day via EventKit')
         _create_all_day(calendar, title, notes, day)
         debug_log('reminders: all-day saved')
         return None
 
+    if due_date is not None and has_time:
+        try:
+            import shortcuts
+        except ImportError:
+            raise RuntimeError('ต้องรันใน Pythonista เพื่อเรียก Shortcut สร้าง Urgent Reminder')
+        due = due_date
+        if due.tzinfo is not None:
+            due = due.astimezone().replace(tzinfo=None)
+        payload = json.dumps({
+            'title': title,
+            'due': due.strftime('%Y-%m-%d %H:%M'),
+            'notes': notes or '',
+        }, ensure_ascii=False)
+        debug_log('reminders: dispatching timed reminder to shortcut=%s' % URGENT_SHORTCUT_NAME)
+        shortcuts.open_shortcuts_app(
+            name=URGENT_SHORTCUT_NAME,
+            shortcut_input=payload,
+        )
+        debug_log('reminders: shortcut launched')
+        return 'shortcut'
+
+    if calendar is None:
+        calendar = get_ai_calendar()
     return _create(calendar, title, notes, due_date, alarm_minutes_before)
 
 def _naive(d):
