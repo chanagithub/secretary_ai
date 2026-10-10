@@ -681,11 +681,12 @@ class _ActionRunner:
             debug_log('flow: save failed: %s' % e)
             self.lines.append('บันทึกไม่สำเร็จ: %s' % e)
         else:
-            self.saved = True
             if save_result == 'shortcut':
-                self.lines.append('ส่งคำสั่งสร้าง Urgent Reminder แล้ว: "%s" กรุณาตรวจรายการในแอป Reminders'
+                # การเปิด URL ไม่ได้ยืนยันว่า Shortcut สร้าง Reminder สำเร็จ
+                self.lines.append('ส่งคำสั่งไปยัง Shortcut แล้ว แต่ยังยืนยันการสร้างไม่ได้: "%s" กรุณาตรวจในแอป Reminders'
                                   % validated['title'])
             else:
+                self.saved = True
                 self.lines.append('บันทึกการเตือนแล้ว: "%s" (ดูในแอป Reminders ลิสต์ "เลขา AI")'
                                   % validated['title'])
         debug_log('flow: do_ok calling step()')
