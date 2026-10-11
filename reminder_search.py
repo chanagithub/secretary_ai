@@ -1,4 +1,3 @@
-# reminder_search.py
 """ค้น Reminder ด้วยข้อความ จากทุกลิสต์ (อ่านอย่างเดียว)
 
 - ชุดคำพ้องมาจาก search_terms.json (ผ่าน search_terms.py) โค้ดเป็นผู้ขยายคำและค้นเอง
@@ -7,6 +6,8 @@
                  past = ผ่านมาแล้วหรือเสร็จแล้วเท่านั้น (ล่าสุดก่อน)
                  all = ทั้งหมด (เก่าไปใหม่)
 - จำคำค้นล่าสุดไว้ชั่วคราว เพื่อให้ตอบต่อได้ เช่น "เฉพาะที่ยังไม่เสร็จ"
+- v12: โค้ดอ่านทิศทางเวลาเอง ("ก่อนหน้านี้", "ได้...มา", "ก่อนวันที่ 11 เดือน 10 2569")
+       และชนิดคำถาม (ask: list/count/amount) แล้วทับค่าที่ AI เลือก
 """
 import datetime
 import re
@@ -16,6 +17,7 @@ import search_terms
 import tools
 
 WHEN_VALUES = ('upcoming', 'past', 'all')
+ASK_VALUES = ('list', 'count', 'amount')
 
 
 def search_schema():
@@ -35,8 +37,8 @@ def search_schema():
             'name': 'search_reminders',
             'description': (
                 'ค้นนัดหมาย/การเตือนจากข้อความในทุกลิสต์ของ Reminders '
-                'เรียกเมื่อผู้ใช้ถามว่านัดหรือเรื่องใดคือวันไหน/เมื่อไหร่ '
-                'เช่น "นัดหมอวันไหน" "ไปกินข้าวกับเพื่อนวันไหน" "ปันผลวันไหน" '
+                'เรียกเมื่อผู้ใช้ถามว่านัดหรือเรื่องใดคือวันไหน/เมื่อไหร่ หรือถามย้อนหลังว่าได้อะไรมาบ้าง '
+                'เช่น "นัดหมอวันไหน" "ไปกินข้าวกับเพื่อนวันไหน" "ปันผลวันไหน" "ที่ผ่านมาได้ปันผลกี่รายการ" '
                 'หัวข้อที่มี: %s' % (', '.join(names) if names else '(ไม่มี)')),
             'parameters': {
                 'type': 'object',
@@ -46,6 +48,13 @@ def search_schema():
                         'type': 'array',
                         'items': {'type': 'string'},
                         'description': 'คำค้นสั้น ๆ ใช้เมื่อไม่มีหัวข้อที่ตรง ห้ามใส่วันที่',
+                    },
+                    'when': {
+                        'type': 'string',
+                        'enum': list(WHEN_VALUES),
+                        'description': 'upcoming = ที่จะถึง/ยังไม่เสร็จ (ค่าเริ่มต้น), '
+                                       'past = ที่ผ่านมา/ก่อนหน้านี้/ได้มาแล้ว, '
+                                       'all = ทั้งอดีตและอนาคต',
                     },
                 },
                 'required': [],
@@ -63,7 +72,16 @@ _PATTERNS = {
     'อ.': r'(?:นัด|พบ|กับ|หา|เจอ)\s*อ\.\s*[ก-๙A-Za-z]',
 }
 
-_QUESTION_WORDS = ('วันไหน', 'เมื่อไหร่', 'เมื่อไร', 'เมื่อใด', 'วันอะไร', 'ตอนไหน', 'กี่โมง')
+_QUESTION_WORDS = ('วันไหน', 'เมื่อไหร่', 'เมื่อไร', 'เมื่อใด', 'วันอะไร', 'ตอนไหน', 'กี่โมง',
+                   'เท่าไหร่', 'เท่าไร', 'กี่รายการ', 'กี่ครั้ง', 'กี่บาท', 'กี่งวด')
+
+# คำบอกอดีตที่ฝังในโค้ด (เสริมจาก search_terms.json ไม่แทนที่)
+_PAST_PHRASES = ('ก่อนหน้านี้', 'ก่อนหน้าวันนี้', 'ก่อนวันนี้', 'ในอดีต', 'ที่ผ่านมา',
+                 'ย้อนหลัง', 'จนถึงวันนี้', 'ถึงวันนี้', 'จนถึงตอนนี้', 'ถึงตอนนี้', 'เคยได้')
+# "ได้ปันผลมา", "ได้มา" (ไม่นับ "ได้มากกว่า", "ได้มาตรฐาน")
+_PAST_RE = re.compile(r'ได้.{0,15}?มา(?!กกว่า|กขึ้น|กที่สุด|ตร)')
+
+
 def _time_words(key):
     return tuple(search_terms.load_when_words().get(key, []))
 
@@ -116,16 +134,48 @@ def _is_question(text):
     return any(w in text for w in _QUESTION_WORDS)
 
 
-def _when_from_text(text):
+def _has_strong_past(text):
+    """คำบอกอดีตที่ฝังในโค้ด (ไม่นับ "จะได้...มา" ซึ่งเป็นอนาคต)"""
+    if any(w in text for w in _PAST_PHRASES):
+        return True
+    return 'จะได้' not in text and _PAST_RE.search(text) is not None
+
+
+def _has_past(text):
+    return _has_strong_past(text) or any(w in text for w in _time_words('past'))
+
+
+def question_kind(text):
+    """'amount' = ถามยอดเงิน, 'count' = ถามจำนวนรายการ, 'list' = ขอดูรายการ"""
+    t = text.translate(_THAI_DIGITS)
+    if re.search(r'เท่า(?:ไหร่|ไร)|ยอดรวม|รวมเป็นเงิน|กี่บาท|รวมยอด', t):
+        return 'amount'
+    if re.search(r'กี่(?:รายการ|ครั้ง|ตัว|หุ้น|อัน|งวด)', t):
+        return 'count'
+    return 'list'
+
+
+def _when_hint(text):
+    """ทิศทางเวลาที่อ่านได้จากประโยค คืน None ถ้าประโยคไม่บอก (ให้ใช้ค่าอื่นแทน)"""
+    period = _period_from_text(text)
+    if period and period.get('before'):
+        # "ก่อนวันที่ X" = ทุกอย่างที่กำหนดวันก่อน X (ทั้งเสร็จแล้วและยังไม่เสร็จ)
+        return 'all'
     if any(w in text for w in _time_words('upcoming')):
         return 'upcoming'
-    period = _period_from_text(text)
     if period:
         # เดือนที่ระบุชัด (เช่น กย 2569) อาจเป็นอดีตหรืออนาคตก็ได้ จึงดูทั้งเดือน ไม่กรองเฉพาะอดีต
         return 'all' if period.get('explicit') else 'past'
+    if _has_strong_past(text):
+        # "ก่อนหน้านี้ทั้งหมด" = อดีตทั้งหมด ไม่ใช่รวมอนาคต
+        return 'past'
     if any(w in text for w in _time_words('past')):
         return 'all' if any(w in text for w in _time_words('all')) else 'past'
-    return 'upcoming'
+    return None
+
+
+def _when_from_text(text):
+    return _when_hint(text) or 'upcoming'
 
 
 _THAI_DIGITS = str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789')
@@ -140,6 +190,41 @@ _NUMBER_WORD_MONTHS = (
     ('สิบสอง', 12), ('สิบเอ็ด', 11), ('สิบ', 10), ('เก้า', 9), ('แปด', 8), ('เจ็ด', 7),
     ('หก', 6), ('ห้า', 5), ('สี่', 4), ('สาม', 3), ('สอง', 2), ('หนึ่ง', 1),
 )
+_MONTH_ALT = '|'.join(re.escape(w) for w, _ in
+                      sorted(_MONTH_WORDS, key=lambda x: len(x[0]), reverse=True))
+# "ก่อนวันที่ 11 เดือน 10 2569", "ก่อน 15/9/69", "ก่อน 1 ตค 2569" (จุดถูกลบก่อนจับ)
+_BEFORE_DATE_RE = re.compile(
+    r'ก่อน\s*(?:วันที่\s*)?(\d{1,2})\s*(?:[/\-]|เดือน(?:ที่)?)?\s*'
+    r'(\d{1,2}|' + _MONTH_ALT + r')(?!\d)'
+    r'\s*(?:[/\-]|ปี)?\s*(?:พศ|คศ)?\s*(\d{4}|\d{2})?(?!\d)')
+
+
+def _norm(text):
+    return (text or '').translate(_THAI_DIGITS).replace('.', '')
+
+
+def _before_date_period(text, today=None):
+    """"ก่อน <วันที่>" -> ช่วงตั้งแต่ต้นจนถึงก่อนวันนั้น (ไม่รวมวันนั้น) ถ้าไม่มีคืน None"""
+    today = today or datetime.date.today()
+    months = dict(_MONTH_WORDS)
+    for m in _BEFORE_DATE_RE.finditer(_norm(text)):
+        day, mon, yr = m.group(1), m.group(2), m.group(3)
+        month = int(mon) if mon.isdigit() else months.get(mon)
+        year = today.year
+        if yr:
+            year = int(yr)
+            if year < 100:                 # 69 -> 2569 (พ.ศ.), 26 -> 2026
+                year += 2500 if year >= 50 else 2000
+            if year >= 2400:               # พ.ศ. -> ค.ศ.
+                year -= 543
+        try:
+            end = datetime.date(year, month, int(day))
+        except (TypeError, ValueError):
+            continue
+        return {'start': '1900-01-01', 'end': end.isoformat(),
+                'label': 'ก่อน %s' % end.strftime('%d/%m/%Y'),
+                'explicit': True, 'before': True}
+    return None
 
 
 def _explicit_period(text):
@@ -181,6 +266,9 @@ def _explicit_period(text):
 
 def _period_from_text(text):
     today = datetime.date.today()
+    before = _before_date_period(text, today)   # ต้องมาก่อน ไม่งั้นได้ "ทั้งเดือน" แทน "ก่อนวันที่"
+    if before:
+        return before
     explicit = _explicit_period(text)
     if explicit:
         return explicit
@@ -197,6 +285,29 @@ def _period_from_text(text):
         return {'start': start.isoformat(), 'end': end.isoformat(),
                 'label': str(today.year - 1)}
     return None
+
+
+def _search_signal(text):
+    """ประโยคมีลักษณะคำถามค้น/บอกช่วงเวลาไหม"""
+    return (_is_question(text) or _has_past(text) or _period_from_text(text) is not None
+            or any(w in text for w in _time_words('upcoming')))
+
+
+def wants_search(text):
+    """ประโยคนี้เป็นคำถามค้นตามหัวข้อ (เช่น ปันผล) ไหม: ใช้กันไม่ให้ตัวดูรายการรายวันแย่งไป"""
+    return bool(topic_terms(match_topics(text))) and _search_signal(text)
+
+
+def apply_text_hints(arguments, text):
+    """ทับค่าที่ AI ส่งมาด้วยสิ่งที่โค้ดอ่านได้จากประโยค (ช่วงเวลา/ทิศทาง/ชนิดคำถาม)"""
+    period = _period_from_text(text)
+    if period:
+        arguments['period'] = period
+    when = _when_hint(text)
+    if when:
+        arguments['when'] = when
+    arguments['ask'] = question_kind(text)
+    return arguments
 
 
 def _remember(action):
@@ -224,12 +335,14 @@ def local_search_action(text, turns=None):
     """ตรวจเจตนาค้นด้วยโค้ด (ไม่พึ่ง AI) คืน action หรือ None"""
     only_open = any(w in text for w in _time_words('upcoming'))
     period = _period_from_text(text)
-    past = (any(w in text for w in _time_words('past')) or period is not None)
+    past = _has_past(text) or period is not None
     when = _when_from_text(text)
+    ask = question_kind(text)
     names = match_topics(text)
     terms = topic_terms(names)
     if terms and (_is_question(text) or past or only_open):
-        action = {'kind': 'search', 'topics': names, 'keywords': terms, 'when': when}
+        action = {'kind': 'search', 'topics': names, 'keywords': terms,
+                  'when': when, 'ask': ask}
         if period:
             action['period'] = period
         return action
@@ -238,7 +351,7 @@ def local_search_action(text, turns=None):
         last_names, last_terms = _last_search(turns)
         if last_terms:
             action = {'kind': 'search', 'topics': last_names, 'keywords': last_terms,
-                      'when': when}
+                      'when': when, 'ask': ask}
             if period:
                 action['period'] = period
             return action
@@ -270,6 +383,8 @@ def validate_search(arguments):
         raise tools.ToolValidationError(
             'AI ไม่ได้ระบุคำค้น กรุณาบอกว่าจะค้นนัดเรื่องอะไร')
     action = {'kind': 'search', 'topics': names, 'keywords': terms[:60], 'when': when}
+    ask = arguments.get('ask')
+    action['ask'] = ask if ask in ASK_VALUES else 'list'
     period = arguments.get('period')
     if (isinstance(period, dict) and isinstance(period.get('start'), str)
             and isinstance(period.get('end'), str)):
@@ -352,6 +467,14 @@ def format_results(dated, undated, keywords, when='upcoming', topics=None):
     return '\n'.join(lines)
 
 
+def ask_note(action, total):
+    """ข้อความเพิ่มตามชนิดคำถาม: ถามยอดเงิน -> บอกตรง ๆ ว่ายังรวมยอดไม่ได้ (ไม่อ้างว่าทำได้)"""
+    if action.get('ask') == 'amount' and total:
+        return ('หมายเหตุ: ตอนนี้ยังรวมยอดเงินให้ไม่ได้ เพราะยอดเงินเขียนอยู่ในชื่อรายการแบบข้อความอิสระ '
+                'จึงแสดงรายการให้ดูก่อน')
+    return ''
+
+
 def run_search(action):
     """ทำการค้นแล้วคืนข้อความสำหรับแสดงในแชท (ไม่ throw)"""
     return run_search_full(action)[0]
@@ -377,3 +500,19 @@ def run_search_full(action):
     if search_terms.LOAD_ERROR:
         text += '\n(หมายเหตุ: %s)' % search_terms.LOAD_ERROR
     return text, dated, undated
+
+
+if __name__ == '__main__':
+    # รันไฟล์นี้ตรง ๆ ใน Pythonista เพื่อดูว่าโค้ดอ่านประโยคตัวอย่างอย่างไร
+    samples = [
+        'ก่อนหน้าวันนี้  คือก่อนวันที่ 11 เดือน 10 2569 ฉันได้ปันผลมากี่รายการ',
+        'ก่อนหน้านี้ทั้งหมดฉันได้ปันผลมาเท่าไหร่',
+        'ช่วยหาเงินเงินปันผล ในอดีต',
+        'ปันผล กย 2569',
+        'ปันผลก่อน 15/9/69',
+        'ปันผลวันไหน',
+    ]
+    for s in samples:
+        a = local_search_action(s)
+        got = None if a is None else (a['when'], (a.get('period') or {}).get('label'), a['ask'])
+        print('-', s, '\n   ->', got, '| wants_search =', wants_search(s))
