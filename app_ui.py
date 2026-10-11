@@ -16,6 +16,7 @@ import assistant_flow
 import search_terms
 from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
 from overlays import ChoiceOverlay
+from mode_flow import ModeController
 from debug_log import log as debug_log
 
 
@@ -39,6 +40,9 @@ class MainView(ui.View):
         self._keep_context = False  # True = รอบนี้ AI ถามเวลา ต้องจำไว้ให้รอบถัดไป
         self._reminder_snapshot = []  # หมายเลขรายการล่าสุดที่ผู้ใช้เห็น ใช้กับคำสั่งต่อเนื่อง
         self._scroll_scheduled = False
+
+        self.mode_ctl = ModeController(self)  # แถบปุ่มโหมด (ดู mode_flow.py)
+        self.add_subview(self.mode_ctl.bar)
 
         self.model_btn = ui.Button()
         self.model_btn.font = ('<system>', 14)
@@ -90,11 +94,13 @@ class MainView(ui.View):
     def layout(self):
         m = 12
         w, h = self.width, self.height
-        self.model_btn.frame = (m, m, w - 3 * m - 76, 36)
-        self.history_btn.frame = (w - m - 76, m, 76, 36)
-        self.input.frame = (m, 56, w - 2 * m, 120)
-        self.send_btn.frame = (m, 184, w - 2 * m, 44)
-        self.output.frame = (m, 240, w - 2 * m, max(h - 252, 50))
+        self.mode_ctl.bar.frame = (m, m, w - 2 * m, 36)
+        top = 52  # แถวถัดไปเลื่อนลงจากแถบโหมด
+        self.model_btn.frame = (m, top + m, w - 3 * m - 76, 36)
+        self.history_btn.frame = (w - m - 76, top + m, 76, 36)
+        self.input.frame = (m, top + 56, w - 2 * m, 120)
+        self.send_btn.frame = (m, top + 184, w - 2 * m, 44)
+        self.output.frame = (m, top + 240, w - 2 * m, max(h - top - 252, 50))
 
     def refresh_model_button(self):
         self.model_btn.title = 'โมเดล: %s  ▾' % config.get_current_model()
@@ -378,6 +384,12 @@ class MainView(ui.View):
         return messages
 
     def begin_request(self, text):
+        """ตรวจว่าเรื่องที่พูดตรงกับโหมดไหม (mode_flow) แล้วค่อยทำงานต่อ"""
+        if self.mode_ctl.check(text):  # ขึ้นป๊อปอัปถามโหมดแล้ว รอผู้ใช้เลือก
+            return
+        self.begin_request_unchecked(text)
+
+    def begin_request_unchecked(self, text):
         """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
         local_list = assistant_flow.local_list_action(text, self._turns)
         if local_list is not None:
