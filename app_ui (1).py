@@ -13,8 +13,10 @@ import console
 import config
 import ai_client
 import assistant_flow
+import search_terms
 from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
 from overlays import ChoiceOverlay
+from mode_flow import ModeController
 from debug_log import log as debug_log
 
 
@@ -36,6 +38,11 @@ class MainView(ui.View):
         self._action_base_text = ''
         self._action_runner = None
         self._keep_context = False  # True = รอบนี้ AI ถามเวลา ต้องจำไว้ให้รอบถัดไป
+        self._reminder_snapshot = []  # หมายเลขรายการล่าสุดที่ผู้ใช้เห็น ใช้กับคำสั่งต่อเนื่อง
+        self._scroll_scheduled = False
+
+        self.mode_ctl = ModeController(self)  # แถบปุ่มโหมด (ดู mode_flow.py)
+        self.add_subview(self.mode_ctl.bar)
 
         self.model_btn = ui.Button()
         self.model_btn.font = ('<system>', 14)
@@ -72,10 +79,12 @@ class MainView(ui.View):
 
         self.output = ui.TextView()
         self.output.editable = False
-        self.output.font = ('<system>', 16)
+        self.output.font = ('<system>', 18)
+        self.output.scroll_enabled = True
         self.add_subview(self.output)
 
         self.right_button_items = [
+            ui.ButtonItem(title='คำค้น', action=self.show_search_terms),
             ui.ButtonItem(title='แชทเก่า', action=self.show_chats),
             ui.ButtonItem(title='เริ่มใหม่', action=self.new_chat)]
 
@@ -85,14 +94,129 @@ class MainView(ui.View):
     def layout(self):
         m = 12
         w, h = self.width, self.height
-        self.model_btn.frame = (m, m, w - 3 * m - 76, 36)
-        self.history_btn.frame = (w - m - 76, m, 76, 36)
-        self.input.frame = (m, 56, w - 2 * m, 120)
-        self.send_btn.frame = (m, 184, w - 2 * m, 44)
-        self.output.frame = (m, 240, w - 2 * m, max(h - 252, 50))
+        self.mode_ctl.bar.frame = (m, m, w - 2 * m, 36)
+        top = 52  # แถวถัดไปเลื่อนลงจากแถบโหมด
+        self.model_btn.frame = (m, top + m, w - 3 * m - 76, 36)
+        self.history_btn.frame = (w - m - 76, top + m, 76, 36)
+        self.input.frame = (m, top + 56, w - 2 * m, 120)
+        self.send_btn.frame = (m, top + 184, w - 2 * m, 44)
+        self.output.frame = (m, top + 240, w - 2 * m, max(h - top - 252, 50))
 
     def refresh_model_button(self):
         self.model_btn.title = 'โมเดล: %s  ▾' % config.get_current_model()
+
+    # ---------- พจนานุกรมคำค้น Reminder ----------
+    def show_search_terms(self, sender):
+        if self._busy_warning():
+            return
+        topics = search_terms.load()
+        table = ui.TableView()
+        table.name = 'พจนานุกรมคำค้น'
+        table.row_height = 58
+
+        def refresh():
+            source.items[:] = [
+                {'title': name, 'subtitle': 'แตะเพื่อดูคำถามและคำค้น'}
+                for name, body in topics.items()]
+            table.reload()
+
+        def on_pick(ds_sender):
+            row = ds_sender.selected_row
+            if isinstance(row, tuple):
+                row = row[1]
+            if row is None or row < 0 or row >= len(source.items):
+                return
+            name = source.items[row]['title']
+            body = topics[name]
+            details = ('“ถามว่า” = สำนวนที่ทำให้ระบบเลือกหัวข้อนี้\n%s\n\n'
+                       '“ค้นหา” = คำที่ใช้เทียบกับชื่อ/รายละเอียด Reminder\n%s' % (
+                           ', '.join(body.get('triggers', [])) or '(ไม่มี)',
+                           ', '.join(body.get('terms', [])) or '(ไม่มี)'))
+            try:
+                # console.alert คืน "ลำดับปุ่ม" (1,2,3) ไม่ใช่ข้อความปุ่ม; Cancel เด้งออกเป็น KeyboardInterrupt
+                choice = console.alert(name, details, 'แก้ไข', 'ลบ')  # Cancel ใช้แทนปุ่มปิด
+            except KeyboardInterrupt:
+                return
+            if choice == 1:
+                self._edit_search_topic(topics, name, refresh)
+            elif choice == 2:
+                try:
+                    console.alert('ลบหัวข้อ?', 'ลบ "%s" และคำค้นทั้งหมด' % name, 'ลบ')
+                except KeyboardInterrupt:  # กดยกเลิก
+                    return
+                if True:
+                    updated = dict(topics)
+                    updated.pop(name, None)
+                    try:
+                        topics.clear(); topics.update(search_terms.save(updated))
+                        refresh()
+                        console.hud_alert('ลบหัวข้อแล้ว', 'success', 1.2)
+                    except (ValueError, OSError) as e:
+                        console.hud_alert(str(e), 'error', 2)
+
+        def on_add(btn):
+            self._edit_search_topic(topics, None, refresh)
+
+        def on_time_words(btn):
+            self._edit_search_time_words(topics)
+
+        source = ui.ListDataSource([])
+        source.action = on_pick
+        table.data_source = source
+        table.delegate = source
+        table.right_button_items = [
+            ui.ButtonItem(title='คำบอกเวลา', action=on_time_words),
+            ui.ButtonItem(title='+ เพิ่ม', action=on_add)]
+        refresh()
+        table.present('sheet')
+
+    def _edit_search_topic(self, topics, old_name, on_saved):
+        old = topics.get(old_name, {}) if old_name else {}
+        try:
+            name = dialogs.input_alert('ชื่อหัวข้อ', 'เช่น หาหมอ, สังสรรค์, ปันผล',
+                                       old_name or '', 'ต่อไป').strip()
+            if not name:
+                return
+            if name in topics and name != old_name:
+                console.hud_alert('มีหัวข้อนี้แล้ว เลือกชื่ออื่น', 'error', 2)
+                return
+            triggers = dialogs.input_alert(
+                'คำที่ผู้ใช้อาจถาม', 'คั่นแต่ละคำด้วยจุลภาค',
+                ', '.join(old.get('triggers', [])), 'ต่อไป')
+            terms = dialogs.input_alert(
+                'คำที่ใช้ค้นใน Reminder', 'คั่นแต่ละคำด้วยจุลภาค',
+                ', '.join(old.get('terms', [])), 'บันทึก')
+        except KeyboardInterrupt:
+            return
+        updated = dict(topics)
+        if old_name and old_name != name:
+            updated.pop(old_name, None)
+        updated[name] = {'ถามว่า': triggers, 'ค้นหา': terms}
+        try:
+            topics.clear(); topics.update(search_terms.save(updated))
+            on_saved()
+            console.hud_alert('บันทึกหัวข้อแล้ว', 'success', 1.2)
+        except (ValueError, OSError) as e:
+            console.hud_alert(str(e), 'error', 2)
+
+    def _edit_search_time_words(self, topics):
+        words = search_terms.load_when_words()
+        labels = [('past', 'คำที่หมายถึงรายการที่ผ่านมา/เสร็จแล้ว'),
+                  ('last_month', 'คำที่หมายถึงช่วงเดือนก่อน'),
+                  ('last_year', 'คำที่หมายถึงช่วงปีที่แล้ว'),
+                  ('all', 'คำที่ขอดูทั้งหมด'),
+                  ('upcoming', 'คำที่ขอดูเฉพาะรายการที่ยังไม่ถึง')]
+        try:
+            for key, title in labels:
+                words[key] = dialogs.input_alert(
+                    title, 'คั่นแต่ละคำด้วยจุลภาค', ', '.join(words[key]), 'ต่อไป')
+        except KeyboardInterrupt:
+            return
+        try:
+            search_terms.save(topics, words)
+            console.hud_alert('บันทึกคำบอกเวลาแล้ว', 'success', 1.2)
+        except (ValueError, OSError) as e:
+            console.hud_alert(str(e), 'error', 2)
 
     # ---------- เลือก/เพิ่มโมเดล ----------
     def _picker_items(self):
@@ -191,6 +315,9 @@ class MainView(ui.View):
         self.output.text = format_chat(turns)
         debug_log('ui: render set output.text done')
         self._scroll_to_bottom()
+        if not self._scroll_scheduled:
+            self._scroll_scheduled = True
+            ui.delay(self._scroll_after_layout, 0.15)
         debug_log('ui: render after _scroll_to_bottom')
         debug_log('ui: render end')
         
@@ -201,6 +328,11 @@ class MainView(ui.View):
             self.output.content_offset = (0, max(y, 0))
         except Exception:  # ถ้า TextView ไม่รองรับ ก็แค่ไม่เลื่อนอัตโนมัติ
             pass
+
+    def _scroll_after_layout(self):
+        self._scroll_scheduled = False
+        if self.output is not None:
+            self._scroll_to_bottom()
 
     def send(self, sender):
         # ระหว่างรอ AI ปุ่มนี้กลายเป็นปุ่ม "หยุด"
@@ -243,10 +375,35 @@ class MainView(ui.View):
             messages.append({'role': 'user',
                              'content': t.get('sent') or t.get('user', '')})
             messages.append({'role': 'assistant', 'content': t['ai']})
+        if self._reminder_snapshot:
+            rows = []
+            for i, item in enumerate(self._reminder_snapshot, 1):
+                rows.append('%d. %s — %s' % (i, item['due'].strftime('%Y-%m-%d %H:%M'), item['title']))
+            messages.append({'role': 'system', 'content':
+                'รายการเตือนล่าสุดที่แสดงให้ผู้ใช้เห็น (ใช้หมายเลขนี้เท่านั้นเมื่อสั่งเลื่อน/เสร็จ/ลบ):\n' + '\n'.join(rows)})
         return messages
 
     def begin_request(self, text):
+        """ตรวจว่าเรื่องที่พูดตรงกับโหมดไหม (mode_flow) แล้วค่อยทำงานต่อ"""
+        if self.mode_ctl.check(text):  # ขึ้นป๊อปอัปถามโหมดแล้ว รอผู้ใช้เลือก
+            return
+        self.begin_request_unchecked(text)
+
+    def begin_request_unchecked(self, text):
         """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
+        local_list = assistant_flow.local_list_action(text, self._turns)
+        if local_list is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            self._run_actions('', [local_list])
+            return
+        local_action = assistant_flow.local_reminder_action(
+            text, self._turns, self._reminder_snapshot)
+        if local_action is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            self._run_actions('', [local_action])
+            return
         info = assistant_flow.find_ambiguous_weekday(text)
         if not info:
             self.start_request(text, text)
@@ -343,7 +500,9 @@ class MainView(ui.View):
             self._finish_turn(text, 'ok')
             self.input.text = ''
             return
-        self._run_actions(text, assistant_flow.prepare_actions(calls))
+        # เมื่อมี tool call ให้แอปเป็นผู้แสดงผลภาษาไทยจากผลจริงของเครื่องมือ
+        # ไม่แสดงข้อความอิสระที่โมเดลอาจส่งมาปน (เช่นคำอธิบายภาษาอังกฤษ)
+        self._run_actions('', assistant_flow.prepare_actions(calls, self))
 
     def _run_actions(self, ai_text, actions):
         """เริ่มลำดับยืนยัน/บันทึก โดยใช้เมธอดของ MainView เป็น callback"""
@@ -400,6 +559,7 @@ class MainView(ui.View):
         self._chat_id = None
         self._turns = []
         self._live = None
+        self._reminder_snapshot = []
         self.render()
 
     def new_chat(self, sender):
@@ -470,6 +630,7 @@ class MainView(ui.View):
         self._chat_id = chat['id']
         self._turns = [t for t in chat['turns'] if isinstance(t, dict)]
         self._live = None
+        self._reminder_snapshot = []
         viewer.close()
         self.render()
 
