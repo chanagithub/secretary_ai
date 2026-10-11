@@ -331,7 +331,7 @@ def _local_wake_alarm_action(text):
                         hour = n
                     elif part in ('เย็น', 'ค่ำ', 'กลางคืน'):
                         hour = n + 12 if n < 12 else n
-                    elif 'บ่าย' in normalized[:match.start()]:
+                    elif match.group(0).startswith('บ่าย') or 'บ่าย' in normalized[:match.start()]:
                         hour = n + 12 if n < 12 else n
                     elif n == 12:
                         hour = 12
