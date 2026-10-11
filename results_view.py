@@ -66,28 +66,59 @@ def _logged(method):
 
 
 class ResultsSource:
-    """data source ของตาราง (อ่านอย่างเดียว)"""
+    """data source ของตาราง (อ่านอย่างเดียว)
+    เก็บข้อมูลเป็นชื่อภายใน (_titles/_rows) แยกกัน ไม่ใช้ชื่อ sections
+    และแปลงเป็น tuple ให้แก้ไขไม่ได้ (กัน TypeError: 'int' has no len())"""
 
     def __init__(self, sections):
-        self.sections = sections
+        titles = []
+        rows_by_section = []
+        for i, sec in enumerate(sections):
+            try:
+                title, rows = sec
+                rows = tuple(rows)          # ถ้า rows ไม่ใช่ลิสต์จะ error ตรงนี้
+            except Exception:
+                debug_log('results: bad section #%d = %r' % (i, sec))
+                continue
+            titles.append(str(title))
+            rows_by_section.append(rows)
+        self._titles = tuple(titles)
+        self._rows = tuple(rows_by_section)
+        debug_log('results: source built sections=%d counts=%r' % (
+            len(self._titles), [len(r) for r in self._rows]))
+
+    def _rows_of(self, section):
+        try:
+            rows = self._rows[section]
+        except Exception:
+            debug_log('results: _rows_of bad index %r (have %d)' % (section, len(self._rows)))
+            return ()
+        if not isinstance(rows, tuple):
+            debug_log('results: _rows_of section %r is %r' % (section, type(rows)))
+            return ()
+        return rows
 
     @_logged
     def tableview_number_of_sections(self, tableview):
-        return len(self.sections)
+        return len(self._rows)
 
     @_logged
     def tableview_number_of_rows(self, tableview, section):
-        return len(self.sections[section][1])
+        return len(self._rows_of(section))
 
     @_logged
     def tableview_title_for_header(self, tableview, section):
-        title, rows = self.sections[section]
-        return '%s (%d)' % (title, len(rows))
+        title = self._titles[section] if 0 <= section < len(self._titles) else ''
+        return '%s (%d)' % (title, len(self._rows_of(section)))
 
     @_logged
     def tableview_cell_for_row(self, tableview, section, row):
-        main, detail, done = self.sections[section][1][row]
         cell = ui.TableViewCell('subtitle')
+        rows = self._rows_of(section)
+        if not (0 <= row < len(rows)):
+            debug_log('results: cell bad row %r/%r' % (section, row))
+            return cell
+        main, detail, done = rows[row]
         cell.text_label.text = main
         cell.text_label.font = ('<system>', 15)
         cell.text_label.number_of_lines = 2
