@@ -110,7 +110,7 @@ class MainView(ui.View):
 
         def refresh():
             source.items[:] = [
-                {'title': name, 'subtitle': body.get('meaning') or 'แตะเพื่อดูคำถามและคำค้น'}
+                {'title': name, 'subtitle': 'แตะเพื่อดูคำถามและคำค้น'}
                 for name, body in topics.items()]
             table.reload()
 
@@ -122,25 +122,23 @@ class MainView(ui.View):
                 return
             name = source.items[row]['title']
             body = topics[name]
-            details = ('ความหมาย: %s\n\n'
-                       '“ถามว่า” = สำนวนที่ทำให้ระบบเลือกหัวข้อนี้\n%s\n\n'
+            details = ('“ถามว่า” = สำนวนที่ทำให้ระบบเลือกหัวข้อนี้\n%s\n\n'
                        '“ค้นหา” = คำที่ใช้เทียบกับชื่อ/รายละเอียด Reminder\n%s' % (
-                           body.get('meaning') or '(ยังไม่ได้ใส่ความหมาย)',
                            ', '.join(body.get('triggers', [])) or '(ไม่มี)',
                            ', '.join(body.get('terms', [])) or '(ไม่มี)'))
             try:
+                # console.alert คืน "ลำดับปุ่ม" (1,2,3) ไม่ใช่ข้อความปุ่ม; Cancel เด้งออกเป็น KeyboardInterrupt
                 choice = console.alert(name, details, 'แก้ไข', 'ลบ', 'ปิด')
             except KeyboardInterrupt:
                 return
-            if choice == 'แก้ไข':
+            if choice == 1:
                 self._edit_search_topic(topics, name, refresh)
-            elif choice == 'ลบ':
+            elif choice == 2:
                 try:
-                    confirm = console.alert('ลบหัวข้อ?', 'ลบ "%s" และคำค้นทั้งหมด' % name,
-                                            'ลบ', 'ยกเลิก')
-                except KeyboardInterrupt:
+                    console.alert('ลบหัวข้อ?', 'ลบ "%s" และคำค้นทั้งหมด' % name, 'ลบ')
+                except KeyboardInterrupt:  # กดยกเลิก
                     return
-                if confirm == 'ลบ':
+                if True:
                     updated = dict(topics)
                     updated.pop(name, None)
                     try:
@@ -176,9 +174,6 @@ class MainView(ui.View):
             if name in topics and name != old_name:
                 console.hud_alert('มีหัวข้อนี้แล้ว เลือกชื่ออื่น', 'error', 2)
                 return
-            meaning = dialogs.input_alert(
-                'ความหมายของหัวข้อ', 'อธิบายสั้น ๆ ให้คุณตรวจดูในเมนู',
-                old.get('meaning', ''), 'ต่อไป')
             triggers = dialogs.input_alert(
                 'คำที่ผู้ใช้อาจถาม', 'คั่นแต่ละคำด้วยจุลภาค',
                 ', '.join(old.get('triggers', [])), 'ต่อไป')
@@ -190,7 +185,7 @@ class MainView(ui.View):
         updated = dict(topics)
         if old_name and old_name != name:
             updated.pop(old_name, None)
-        updated[name] = {'ความหมาย': meaning, 'ถามว่า': triggers, 'ค้นหา': terms}
+        updated[name] = {'ถามว่า': triggers, 'ค้นหา': terms}
         try:
             topics.clear(); topics.update(search_terms.save(updated))
             on_saved()
