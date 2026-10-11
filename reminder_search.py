@@ -171,7 +171,7 @@ def _explicit_period(text):
         return None
     if year >= 2400:
         year -= 543
-    if not 2000 <= year <= 2100:
+    if not 1900 <= year <= 2200:
         return None
     start = datetime.date(year, month, 1)
     end = datetime.date(year + (month == 12), month % 12 + 1, 1)
@@ -269,7 +269,15 @@ def validate_search(arguments):
     if not terms:
         raise tools.ToolValidationError(
             'AI ไม่ได้ระบุคำค้น กรุณาบอกว่าจะค้นนัดเรื่องอะไร')
-    return {'kind': 'search', 'topics': names, 'keywords': terms[:60], 'when': when}
+    action = {'kind': 'search', 'topics': names, 'keywords': terms[:60], 'when': when}
+    period = arguments.get('period')
+    if (isinstance(period, dict) and isinstance(period.get('start'), str)
+            and isinstance(period.get('end'), str)):
+        action['period'] = {'start': period['start'], 'end': period['end'],
+                            'label': str(period.get('label', ''))}
+        if period.get('start') and arguments.get('when') not in WHEN_VALUES:
+            action['when'] = 'all'
+    return action
 
 
 def _naive(d):
@@ -358,6 +366,10 @@ def run_search_full(action):
     except Exception as e:
         return 'ค้นรายการเตือนไม่สำเร็จ: %s' % e, [], []
     text = format_results(dated, undated, action['keywords'], when, action.get('topics'))
+    if action.get('period') and not dated and not undated:
+        topics = action.get('topics')
+        label = ' + '.join(topics) if topics else ' / '.join(action['keywords'][:4])
+        return 'ไม่พบข้อมูล "%s" ในช่วง %s' % (label, action['period']['label']), [], []
     if action.get('period'):
         period = action['period']
         text = text.replace(' (%s)' % _SCOPE[when][0],

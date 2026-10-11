@@ -288,6 +288,7 @@ def _local_wake_alarm_action(text):
         return int(value) if value.isdigit() else number_words.get(value)
 
     hour = minute = None
+    ambiguous_hour = None
     match = re.search(r'(?<!\d)(\d{1,2})\s*[:.]\s*(\d{2})(?!\d)', normalized)
     if match:
         hour, minute = int(match.group(1)), int(match.group(2))
@@ -322,11 +323,17 @@ def _local_wake_alarm_action(text):
                     if part in ('เช้า', 'สาย'):
                         hour = n
                     elif part in ('เย็น', 'ค่ำ', 'กลางคืน'):
-                        hour = n if n >= 6 else n + 12
+                        hour = n + 12 if n < 12 else n
                     elif 'บ่าย' in normalized[:match.start()]:
                         hour = n + 12 if n < 12 else n
                     elif n == 12:
                         hour = 12
+                    elif n is not None and 13 <= n <= 23:
+                        hour = n
+                    elif n is not None and 1 <= n <= 11:
+                        # "11 โมง" เฉยๆ ไม่บอกเช้า/บ่าย: ตัดสินทีหลังว่าครั้งไหนจะมาถึงก่อน (ถ้าไม่ได้บอกวัน)
+                        hour = n
+                        ambiguous_hour = n
                     else:
                         return {'kind': 'note', 'pending': True,
                                 'text': 'หมายถึงกี่โมงครับ เช่น 6 โมงเช้า หรือ 6 โมงเย็น'}
@@ -342,13 +349,28 @@ def _local_wake_alarm_action(text):
                         if part in ('เช้า', 'สาย'):
                             hour = n
                         else:
-                            hour = n if n >= 6 else n + 12
+                            hour = n + 12 if n < 12 else n
                         minute = 0
 
     if hour is None:
         return {'kind': 'note', 'pending': True, 'text': 'จะให้ปลุกกี่โมงครับ'}
 
     today = datetime.date.today()
+    if ambiguous_hour is not None:
+        has_day = (any(w in normalized for w in ('มะรืน', 'พรุ่งนี้', 'วันนี้', 'คืนนี้', 'เช้านี้', 'เย็นนี้'))
+                   or re.search(r'\b20\d{2}-\d{1,2}-\d{1,2}\b', normalized)
+                   or any(w in normalized for w in ('จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์', 'อาทิตย์')))
+        if has_day:
+            return {'kind': 'note', 'pending': True,
+                    'text': 'หมายถึงกี่โมงครับ เช่น %d โมงเช้า หรือ %d โมงเย็น' % (ambiguous_hour, ambiguous_hour)}
+        # ไม่บอกวันและไม่บอกเช้า/เย็น: ใช้ช่วงเวลา (เช้า/บ่าย) ที่จะมาถึงก่อน
+        now = datetime.datetime.now()
+        for h in (ambiguous_hour, ambiguous_hour + 12):
+            if datetime.datetime.combine(today, datetime.time(h, 0)) > now:
+                hour = h
+                break
+        else:
+            hour = ambiguous_hour
     if 'มะรืน' in normalized:
         day = today + datetime.timedelta(days=2)
     elif 'พรุ่งนี้' in normalized:
@@ -431,10 +453,11 @@ def ask_ai(sent_text, on_chunk, token, model, history):
         return '', [wake['call']]
     local = reminder_search.local_search_action(sent_text, turns)
     if local:
-        return '', [{'id': None, 'name': 'search_reminders',
-                     'arguments': {'topics': local['topics'],
-                                   'keywords': local['keywords'],
-                                   'when': local['when']}}]
+        arguments = {'topics': local['topics'], 'keywords': local['keywords'],
+                     'when': local['when']}
+        if local.get('period'):
+            arguments['period'] = local['period']
+        return '', [{'id': None, 'name': 'search_reminders', 'arguments': arguments}]
     text, calls = ai_client.stream_chat_with_tools(
         sent_text, on_chunk, token,
         tools.ALL_TOOLS + [reminder_search.search_schema()],
@@ -456,6 +479,13 @@ def ask_ai(sent_text, on_chunk, token, model, history):
     if question:
         on_chunk(question)
         return question, []
+    # ถ้าผู้ใช้ระบุเดือน+ปี ให้ใช้ช่วงนั้นกับทุกคำสั่งค้น ไม่ปล่อยให้โมเดลเลือกเองจนได้ผลทั้งหมด
+    period = reminder_search._explicit_period(sent_text)
+    if period:
+        for call in calls:
+            if call.get('name') == 'search_reminders':
+                call['arguments']['period'] = period
+                call['arguments']['when'] = 'all'
     return text, calls
 
 # ---------- 3) ตรวจค่า + ยืนยัน + บันทึก ----------
