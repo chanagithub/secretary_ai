@@ -16,6 +16,7 @@ import ui
 import re
 import time
 import ai_client
+import compound_split
 import date_guard
 import reminders_tool
 import reminder_search
@@ -441,12 +442,44 @@ def _wake_pending_text(sent_text):
     return previous
 
 
+def _note_call(text):
+    return {'id': None, 'name': '_note', 'local_note': text, 'arguments': {}}
+
+
+def _ask_compound(compound, on_chunk, token, model, history):
+    """ประโยคผสม "เรื่องอื่น + ปลุก": ส่วนปลุกให้โค้ดทำเอง ส่วนที่เหลือถาม AI ตามปกติ
+    แล้วรวมเป็นรายการเดียว (เรียงตามที่พูด) ขึ้นป๊อปอัปยืนยันทีละรายการ
+    ถ้าทำไม่ครบ จะบอกผู้ใช้ตรง ๆ ว่าส่วนไหนยังไม่ได้ทำ ไม่เงียบ"""
+    wake_clause, rest = compound['wake'], compound['rest']
+    debug_log('flow: compound wake=%r rest=%r wake_first=%s' % (
+        wake_clause, rest, compound['wake_first']))
+    wake = _local_wake_alarm_action(wake_clause)
+    if not wake or wake['kind'] == 'note':
+        reason = wake['text'] if wake else 'ตั้งปลุกไม่สำเร็จ'
+        # ปลุกยังไม่ครบ (เช่น ไม่บอกเวลา): ยังไม่ทำส่วนอื่นเพื่อไม่ให้ลำดับสับสน
+        return '', [_note_call('%s (ส่วน "%s" ยังไม่ได้ทำ กรุณาสั่งใหม่ให้ครบ)' % (reason, rest))]
+    wake_calls = [wake['call']]
+    sink = []
+    text, rest_calls = ask_ai(rest, sink.append, token, model, history)
+    if not rest_calls:
+        # AI ถามกลับหรือตอบเป็นข้อความ (เช่น ขาดเวลา) คำถามต้องไม่หาย
+        said = (text or ''.join(sink)).strip() or 'ไม่เข้าใจคำสั่ง'
+        rest_calls = [_note_call('ส่วน "%s" ยังไม่ได้ทำ: %s (สั่งส่วนนี้ใหม่อีกครั้งได้เลยครับ)'
+                                 % (rest, said))]
+    calls = wake_calls + rest_calls if compound['wake_first'] else rest_calls + wake_calls
+    return '', calls
+
+
 def ask_ai(sent_text, on_chunk, token, model, history):
     """คืน (text, tool_calls) ถ้ามีปัญหาจะ raise ai_client.AIError"""
     # คำถามค้นนัดและคำตอบต่อ ให้โค้ดตัดสินเอง ไม่พึ่งการเลือกเครื่องมือของโมเดลเล็ก
     turns = [{'user': str(m.get('content') or '')}
              for m in (history or []) if m.get('role') == 'user']
     previous_wake = _wake_pending_text(sent_text)
+    # [v14] ประโยคที่มีทั้ง "ปลุก" และเรื่องอื่น: แยกทำทั้งสองงาน (ดู compound_split.py)
+    compound = None if previous_wake else compound_split.split_wake(sent_text)
+    if compound:
+        return _ask_compound(compound, on_chunk, token, model, history)
     wake_text = (previous_wake + ' ' + sent_text) if previous_wake else sent_text
     wake = _local_wake_alarm_action(wake_text)
     if wake:
