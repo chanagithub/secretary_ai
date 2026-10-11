@@ -128,7 +128,7 @@ class MainView(ui.View):
                            ', '.join(body.get('terms', [])) or '(ไม่มี)'))
             try:
                 # console.alert คืน "ลำดับปุ่ม" (1,2,3) ไม่ใช่ข้อความปุ่ม; Cancel เด้งออกเป็น KeyboardInterrupt
-                choice = console.alert(name, details, 'แก้ไข', 'ลบ', 'ปิด')
+                choice = console.alert(name, details, 'แก้ไข', 'ลบ')  # Cancel ใช้แทนปุ่มปิด
             except KeyboardInterrupt:
                 return
             if choice == 1:
