@@ -475,6 +475,10 @@ def ask_ai(sent_text, on_chunk, token, model, history):
     # คำถามค้นนัดและคำตอบต่อ ให้โค้ดตัดสินเอง ไม่พึ่งการเลือกเครื่องมือของโมเดลเล็ก
     turns = [{'user': str(m.get('content') or '')}
              for m in (history or []) if m.get('role') == 'user']
+    # [v14] คำตอบสั้น ๆ ต่อจากคำสั่งเดิม (เช่น "บ่าย 2 โมง" หลังกด "ระบุเวลา") ใช้วันที่จากคำสั่งเดิมด้วย
+    # ไม่ถามวันซ้ำ; ถ้าเวลาที่ได้เป็นอดีต validate_create_reminder ยังตรวจกันไว้อีกชั้น
+    prior_user = turns[-1]['user'] if turns else ''
+    date_text = (sent_text + ' ' + prior_user) if len(sent_text.strip()) <= 40 else sent_text
     previous_wake = _wake_pending_text(sent_text)
     # [v14] ประโยคที่มีทั้ง "ปลุก" และเรื่องอื่น: แยกทำทั้งสองงาน (ดู compound_split.py)
     compound = None if previous_wake else compound_split.split_wake(sent_text)
@@ -508,7 +512,7 @@ def ask_ai(sent_text, on_chunk, token, model, history):
         recovered = _recover_pseudo_call(text)
         debug_log('flow: pseudo tool-call text, recovered=%s' % bool(recovered))
         if recovered:
-            question = _correct_date_omitted_create(sent_text, [recovered])
+            question = _correct_date_omitted_create(date_text, [recovered])
             if question:
                 on_chunk(question)
                 return question, []
@@ -518,7 +522,7 @@ def ask_ai(sent_text, on_chunk, token, model, history):
         # app_ui ใช้ข้อความที่สะสมจาก on_chunk เมื่อไม่มี tool call จึงส่งเป็น "ข้อความแจ้ง" แทน
         return '', [{'id': None, 'name': '_note', 'local_note': _PSEUDO_FALLBACK,
                      'arguments': {}}]
-    question = _correct_date_omitted_create(sent_text, calls)
+    question = _correct_date_omitted_create(date_text, calls)
     if question:
         on_chunk(question)
         return question, []
