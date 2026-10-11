@@ -1,15 +1,14 @@
 """assistant_flow.py - ลำดับงานของเลขา AI (เฟส 1: เตือนความจำ)
-ย้ายลอจิกที่ทดสอบแล้วจาก test_ai_tools.py มาใช้กับหน้าจอจริง โดยเปลี่ยนการพิมพ์
-ตอบเป็นปุ่มกด:
- 1. ก่อนส่ง : date_guard ตรวจชื่อวันที่ตรงกับวันนี้ -> ป๊อปอัปเลือก "วันนี้ /
-สัปดาห์หน้า"
+ย้ายลอจิกที่ทดสอบแล้วจาก test_ai_tools.py มาใช้กับหน้าจอจริง โดยเปลี่ยนการพิมพ์ตอบเป็นปุ่มกด:
+ 1. ก่อนส่ง : date_guard ตรวจชื่อวันที่ตรงกับวันนี้ -> ป๊อปอัปเลือก "วันนี้ / สัปดาห์หน้า"
  2. คุยกับ AI : ask_ai() (streaming + tool calling)
- 3. หลังตอบ : prepare_actions() ตรวจค่าที่ AI ส่งมา -> run_actions() ขึ้น
-ป๊อปอัปยืนยัน
- ตกลง / ไม่เอา / ทำรายการใหม่ แล้วบันทึกลง Reminders จริง
-เมื่อกด "ตกลง"
-ไฟล์นี้ไม่ผูกกับหน้าจอหลักโดยตรง: ใช้ host.show_overlay(overlay) เพื่อแสดงป๊อปอัป
-เท่านั้น
+ 3. หลังตอบ : prepare_actions() ตรวจค่าที่ AI ส่งมา -> run_actions() ขึ้นป๊อปอัปยืนยัน
+    ตกลง / ไม่เอา / ทำรายการใหม่ แล้วบันทึกลง Reminders จริงเมื่อกด "ตกลง"
+ไฟล์นี้ไม่ผูกกับหน้าจอหลักโดยตรง: ใช้ host.show_overlay(overlay) เพื่อแสดงป๊อปอัปเท่านั้น
+
+v12: คำถามค้นตามหัวข้อ (เช่น "ได้ปันผลมากี่รายการ") ไม่ถูก local_list_action แย่งไป,
+     เวลา/ช่วง/ชนิดคำถามที่โค้ดอ่านจากประโยคทับค่าที่ AI เลือก (reminder_search.apply_text_hints),
+     ถามยอดเงินแล้วบอกตรง ๆ ว่ายังรวมยอดไม่ได้ (reminder_search.ask_note)
 """
 import ast
 import datetime
@@ -98,6 +97,13 @@ def local_reminder_action(text, turns, snapshot):
 
 def local_list_action(text, turns=None):
     """แปลงคำขอดูรายการรายวัน/รายเดือนด้วยโค้ด เพื่อกัน AI แปลงเดือนหรือปีผิด"""
+    # [v12] คำถามค้นตามหัวข้อ (เช่น "ได้ปันผลมากี่รายการ") ให้ reminder_search จัดการ
+    # กันคำว่า "รายการ" ใน "กี่รายการ" ทำให้กลายเป็นดูรายการรายวัน
+    if reminder_search.wants_search(text):
+        return None
+    # [v12] "ก่อนหน้าวันนี้", "จนถึงวันนี้" ไม่ได้แปลว่า "วันนี้"
+    for phrase in ('ก่อนหน้าวันนี้', 'ก่อนวันนี้', 'จนถึงวันนี้', 'ถึงวันนี้', 'ตั้งแต่วันนี้'):
+        text = text.replace(phrase, ' ')
     lower = text.lower()
     list_words = ('ลิสต์', 'รายการ', 'ต้องทำ', 'ทำอะไร', 'เตือน', 'งาน', 'reminder')
     month_words = ('มกราคม', 'ม.ค.', 'กุมภาพันธ์', 'ก.พ.', 'มีนาคม', 'มี.ค.', 'เมษายน', 'เม.ย.',
@@ -454,9 +460,11 @@ def ask_ai(sent_text, on_chunk, token, model, history):
     local = reminder_search.local_search_action(sent_text, turns)
     if local:
         arguments = {'topics': local['topics'], 'keywords': local['keywords'],
-                     'when': local['when']}
+                     'when': local['when'], 'ask': local.get('ask', 'list')}
         if local.get('period'):
             arguments['period'] = local['period']
+        debug_log('flow: local search when=%s period=%s ask=%s' % (
+            arguments['when'], (arguments.get('period') or {}).get('label'), arguments['ask']))
         return '', [{'id': None, 'name': 'search_reminders', 'arguments': arguments}]
     text, calls = ai_client.stream_chat_with_tools(
         sent_text, on_chunk, token,
@@ -471,6 +479,8 @@ def ask_ai(sent_text, on_chunk, token, model, history):
             if question:
                 on_chunk(question)
                 return question, []
+            if recovered.get('name') == 'search_reminders':
+                reminder_search.apply_text_hints(recovered['arguments'], sent_text)
             return '', [recovered]
         # app_ui ใช้ข้อความที่สะสมจาก on_chunk เมื่อไม่มี tool call จึงส่งเป็น "ข้อความแจ้ง" แทน
         return '', [{'id': None, 'name': '_note', 'local_note': _PSEUDO_FALLBACK,
@@ -479,13 +489,15 @@ def ask_ai(sent_text, on_chunk, token, model, history):
     if question:
         on_chunk(question)
         return question, []
-    # ถ้าผู้ใช้ระบุเดือน+ปี ให้ใช้ช่วงนั้นกับทุกคำสั่งค้น ไม่ปล่อยให้โมเดลเลือกเองจนได้ผลทั้งหมด
-    period = reminder_search._explicit_period(sent_text)
-    if period:
-        for call in calls:
-            if call.get('name') == 'search_reminders':
-                call['arguments']['period'] = period
-                call['arguments']['when'] = 'all'
+    # [v12] ช่วงเวลา/ทิศทาง/ชนิดคำถาม ให้โค้ดอ่านจากประโยคแล้วทับค่าที่โมเดลเลือก
+    for call in calls:
+        if call.get('name') == 'search_reminders':
+            args = call.get('arguments')
+            if not isinstance(args, dict):
+                args = call['arguments'] = {}
+            reminder_search.apply_text_hints(args, sent_text)
+            debug_log('flow: AI search when=%s period=%s ask=%s' % (
+                args.get('when'), (args.get('period') or {}).get('label'), args.get('ask')))
     return text, calls
 
 # ---------- 3) ตรวจค่า + ยืนยัน + บันทึก ----------
@@ -617,13 +629,14 @@ class _ActionRunner:
         self.host._reminder_snapshot = []
         text, dated, undated = reminder_search.run_search_full(action)
         total = len(dated) + len(undated)
+        note = reminder_search.ask_note(action, total)
         if total <= results_view.TABLE_THRESHOLD:
-            self.lines.append(text)
+            self.lines.append(text + ('\n' + note if note else ''))
             self.step()
             return
         # ผลเยอะ: แชทเหลือบรรทัดสรุป รายการเต็มดูในตาราง (อ่านอย่างเดียว) แล้วทำงานต่อหลังกดปิด
         header = text.split('\n', 1)[0].rstrip(':')
-        self.lines.append('%s\n(แสดงเป็นตารางแล้ว)' % header)
+        self.lines.append('%s\n%s(แสดงเป็นตารางแล้ว)' % (header, note + '\n' if note else ''))
         debug_log('flow: showing ResultsOverlay rows=%d' % total)
         self.host.show_overlay(results_view.ResultsOverlay(
             header, dated, undated, self.on_results_closed))
