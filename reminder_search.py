@@ -119,15 +119,71 @@ def _is_question(text):
 def _when_from_text(text):
     if any(w in text for w in _time_words('upcoming')):
         return 'upcoming'
-    if _period_from_text(text):
-        return 'past'
+    period = _period_from_text(text)
+    if period:
+        # เดือนที่ระบุชัด (เช่น กย 2569) อาจเป็นอดีตหรืออนาคตก็ได้ จึงดูทั้งเดือน ไม่กรองเฉพาะอดีต
+        return 'all' if period.get('explicit') else 'past'
     if any(w in text for w in _time_words('past')):
         return 'all' if any(w in text for w in _time_words('all')) else 'past'
     return 'upcoming'
 
 
+_THAI_DIGITS = str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789')
+_MONTH_WORDS = (  # ยาวก่อนสั้น กันจับ "สิบ" ก่อน "สิบสอง"
+    ('มกราคม', 1), ('กุมภาพันธ์', 2), ('มีนาคม', 3), ('เมษายน', 4), ('พฤษภาคม', 5),
+    ('มิถุนายน', 6), ('กรกฎาคม', 7), ('สิงหาคม', 8), ('กันยายน', 9), ('ตุลาคม', 10),
+    ('พฤศจิกายน', 11), ('ธันวาคม', 12),
+    ('มีค', 3), ('มิย', 6), ('มค', 1), ('กพ', 2), ('เมย', 4), ('พค', 5), ('กค', 7),
+    ('สค', 8), ('กย', 9), ('ตค', 10), ('พย', 11), ('ธค', 12),
+)
+_NUMBER_WORD_MONTHS = (
+    ('สิบสอง', 12), ('สิบเอ็ด', 11), ('สิบ', 10), ('เก้า', 9), ('แปด', 8), ('เจ็ด', 7),
+    ('หก', 6), ('ห้า', 5), ('สี่', 4), ('สาม', 3), ('สอง', 2), ('หนึ่ง', 1),
+)
+
+
+def _explicit_period(text):
+    """เดือน+ปีที่ระบุชัดในประโยค เช่น "เดือนเก้าปี 2026", "กย 2569", "ก.ย. 69"->ไม่รองรับ, "9/2026"
+    ต้องมีทั้งเดือนและปี (พ.ศ. 2400 ขึ้นไป แปลงเป็น ค.ศ.) ถ้าไม่ครบคืน None"""
+    t = text.translate(_THAI_DIGITS).replace('.', '')
+    month = None
+    m = re.search(r'(?<![\d/])(\d{1,2})/(\d{4})(?![\d/])', t)
+    year = None
+    if m:
+        month, year = int(m.group(1)), int(m.group(2))
+    else:
+        m = re.search(r'เดือน(?:ที่)?\s*(\d{1,2})(?!\d)', t)
+        if m:
+            month = int(m.group(1))
+        if month is None:
+            m = re.search(r'เดือน\s*(%s)' % '|'.join(w for w, _ in _NUMBER_WORD_MONTHS), t)
+            if m:
+                month = dict(_NUMBER_WORD_MONTHS)[m.group(1)]
+        if month is None:
+            for w, n in _MONTH_WORDS:
+                if w in t:
+                    month = n
+                    break
+        ym = re.search(r'(?<![\d/])(\d{4})(?![\d/])', t)
+        if ym:
+            year = int(ym.group(1))
+    if month is None or year is None or not 1 <= month <= 12:
+        return None
+    if year >= 2400:
+        year -= 543
+    if not 2000 <= year <= 2100:
+        return None
+    start = datetime.date(year, month, 1)
+    end = datetime.date(year + (month == 12), month % 12 + 1, 1)
+    return {'start': start.isoformat(), 'end': end.isoformat(),
+            'label': '%02d/%d' % (month, year), 'explicit': True}
+
+
 def _period_from_text(text):
     today = datetime.date.today()
+    explicit = _explicit_period(text)
+    if explicit:
+        return explicit
     words = search_terms.load_when_words()
     if any(w in text for w in words.get('last_month', [])):
         first_this_month = today.replace(day=1)
