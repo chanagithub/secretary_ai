@@ -96,6 +96,26 @@ def local_reminder_action(text, turns, snapshot):
     return None
 
 
+_PERIOD_WORDS = ('วันนี้', 'พรุ่งนี้', 'มะรืน', 'เดือนนี้', 'เดือนหน้า', 'เดือนถัดไป',
+                 'เดือนที่แล้ว', 'เดือนก่อน', 'เดือนที่ผ่าน', 'สัปดาห์นี้', 'สัปดาห์หน้า',
+                 'วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัส', 'วันศุกร์', 'วันเสาร์',
+                 'วันอาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์', 'อาทิตย์',
+                 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม',
+                 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
+                 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.',
+                 'ต.ค.', 'พ.ย.', 'ธ.ค.', 'ที่จะถึง', 'ถัดไป', 'หน้า', 'แล้ว', 'ล่ะ', 'ละ',
+                 'ด้วย', 'บ้าง', 'หน่อย', 'นะ', 'ครับ', 'ค่ะ', 'คะ', 'ของ', 'วัน', 'เดือน')
+
+
+def _is_period_followup(text):
+    """True ถ้าข้อความมีแต่คำบอกช่วงเวลา/คำเติมท้าย (ไม่มีเนื้อเรื่องอื่น)"""
+    rest = text
+    for w in sorted(_PERIOD_WORDS, key=len, reverse=True):
+        rest = rest.replace(w, ' ')
+    rest = re.sub(r'[\d\s,.:/\-?]+', '', rest)
+    return len(rest) < 3
+
+
 def local_list_action(text, turns=None):
     """แปลงคำขอดูรายการรายวัน/รายเดือนด้วยโค้ด เพื่อกัน AI แปลงเดือนหรือปีผิด"""
     # [v12] คำถามค้นตามหัวข้อ (เช่น "ได้ปันผลมากี่รายการ") ให้ reminder_search จัดการ
@@ -119,7 +139,10 @@ def local_list_action(text, turns=None):
         prior_list_request = any(
             any(word in str(turn.get('user') or '').lower() for word in list_words)
             for turn in (turns or [])[-6:])
-        if not (has_period and prior_list_request) or has_mutation_request:
+        # [v14] ต่อจากคำขอดูรายการได้เฉพาะประโยคสั้น ๆ ที่มีแต่ช่วงเวลา เช่น "แล้วพรุ่งนี้ล่ะ"
+        # ประโยคที่มีเรื่องอื่นปน เช่น "พรุ่งนี้มีประชุม" คือการสั่งสร้าง ไม่ใช่ขอดูรายการ
+        if (not (has_period and prior_list_request) or has_mutation_request
+                or not _is_period_followup(text)):
             return None
     completed = any(word in lower for word in ('เสร็จ', 'ทำแล้ว', 'completed', 'ยกเลิก', 'ทำอะไรมาบ้าง', 'ทำอะไรไปบ้าง'))
     status = 'completed' if completed else ('all' if 'ทั้งหมด' in lower else 'incomplete')
@@ -477,7 +500,8 @@ def ask_ai(sent_text, on_chunk, token, model, history):
              for m in (history or []) if m.get('role') == 'user']
     # [v14] คำตอบสั้น ๆ ต่อจากคำสั่งเดิม (เช่น "บ่าย 2 โมง" หลังกด "ระบุเวลา") ใช้วันที่จากคำสั่งเดิมด้วย
     # ไม่ถามวันซ้ำ; ถ้าเวลาที่ได้เป็นอดีต validate_create_reminder ยังตรวจกันไว้อีกชั้น
-    prior_user = turns[-1]['user'] if turns else ''
+    # ดูข้อความผู้ใช้ย้อนหลัง 3 ข้อความ: วันที่อาจอยู่ในคำสั่งแรก (ก่อนที่ AI ถามเรื่อง/เวลากลับ)
+    prior_user = ' '.join(t['user'] for t in turns[-3:])
     date_text = (sent_text + ' ' + prior_user) if len(sent_text.strip()) <= 40 else sent_text
     previous_wake = _wake_pending_text(sent_text)
     # [v14] ประโยคที่มีทั้ง "ปลุก" และเรื่องอื่น: แยกทำทั้งสองงาน (ดู compound_split.py)
