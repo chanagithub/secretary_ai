@@ -5,6 +5,7 @@
 - ResultsOverlay : หน้าจอทับ (รูปแบบเดียวกับป๊อปอัปใน overlays.py) มีตาราง + ปุ่มปิด
 ปิดตัวเองก่อนเรียก on_close เสมอ จึงเปิดหน้าถัดไปต่อใน callback ได้
 """
+import traceback
 import ui
 import tools
 from debug_log import log as debug_log
@@ -51,22 +52,39 @@ def build_sections(dated, undated):
     return sections
 
 
+def _logged(method):
+    """[DEBUG] จดข้อผิดพลาดพร้อม traceback ลง debug log แล้วโยนต่อ (พฤติกรรมเดิม) เพื่อหาสาเหตุ TypeError"""
+    def wrapper(self, *args):
+        try:
+            return method(self, *args)
+        except Exception:
+            debug_log('results: %s failed args=%r\n%s' % (
+                method.__name__, args[1:], traceback.format_exc()))
+            raise
+    wrapper.__name__ = method.__name__
+    return wrapper
+
+
 class ResultsSource:
     """data source ของตาราง (อ่านอย่างเดียว)"""
 
     def __init__(self, sections):
         self.sections = sections
 
+    @_logged
     def tableview_number_of_sections(self, tableview):
         return len(self.sections)
 
+    @_logged
     def tableview_number_of_rows(self, tableview, section):
         return len(self.sections[section][1])
 
+    @_logged
     def tableview_title_for_header(self, tableview, section):
         title, rows = self.sections[section]
         return '%s (%d)' % (title, len(rows))
 
+    @_logged
     def tableview_cell_for_row(self, tableview, section, row):
         main, detail, done = self.sections[section][1][row]
         cell = ui.TableViewCell('subtitle')
