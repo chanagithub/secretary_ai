@@ -15,9 +15,11 @@ save_record(db_path, rec) -> (ok, ข้อความไทย, row_id)
 """
 import datetime
 import math
+import os
 import sqlite3
 
 import finance_db as fdb
+from debug_log import log as debug_log
 
 INCOME = 'income'
 EXPENSE = 'expense'
@@ -136,9 +138,13 @@ def _differences(r, row):
 
 
 def save_record(db_path, rec):
+    debug_log('finance_write: start db=%s' % os.path.basename(str(db_path)))
     try:
         r = _prepare(rec)
+        debug_log('finance_write: validated record')
+        debug_log('finance_write: checking target')
         _check_target(db_path, r)
+        debug_log('finance_write: target checked')
     except _Refused as e:
         return False, str(e), None
     except fdb.FinanceDBError as e:
@@ -147,7 +153,9 @@ def save_record(db_path, rec):
     conn = None
     row_id = None
     try:
+        debug_log('finance_write: opening writable connection')
         conn = sqlite3.connect(db_path, timeout=_TIMEOUT)
+        debug_log('finance_write: writable connection opened')
         cur = conn.cursor()
         if r['kind'] == EXPENSE:
             cur.execute(_INSERT_EXPENSE, (r['date'], r['year'], r['month'], 0, r['detail'],
@@ -156,24 +164,32 @@ def save_record(db_path, rec):
             cur.execute(_INSERT_INCOME, (r['date'], r['year'], r['month'], 0, r['detail'],
                                          r['category_id'], r['amount'], r['note']))
         row_id = cur.lastrowid
+        debug_log('finance_write: insert executed row_id=%s' % row_id)
         conn.commit()
+        debug_log('finance_write: commit completed')
     except sqlite3.Error as e:
         try:
             if conn is not None:
                 conn.rollback()
         except sqlite3.Error:
             pass
+        debug_log('finance_write: sqlite error: %r' % e)
         return False, 'เขียนฐานข้อมูลไม่สำเร็จ ไม่ได้บันทึก: %s' % e, None
     finally:
         if conn is not None:
             conn.close()
+            debug_log('finance_write: writable connection closed')
 
     try:
+        debug_log('finance_write: reading inserted row back')
         diffs = _differences(r, _read_back(db_path, r['kind'], row_id))
+        debug_log('finance_write: read-back completed')
     except (sqlite3.Error, fdb.FinanceDBError) as e:
         return (False, 'เขียนแล้วแต่อ่านกลับมาตรวจไม่ได้ (%s) กรุณาเปิดแอป ChanaFinance ตรวจรายการนี้' % e,
                 row_id)
     if diffs:
+        debug_log('finance_write: read-back differences=%s' % ','.join(diffs))
         return (False, 'เขียนแล้วแต่ข้อมูลที่อ่านกลับไม่ตรง (%s) กรุณาเปิดแอป ChanaFinance ตรวจรายการนี้'
                 % ', '.join(diffs), row_id)
+    debug_log('finance_write: save verified row_id=%s' % row_id)
     return True, '', row_id

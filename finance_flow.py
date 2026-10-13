@@ -286,11 +286,14 @@ class FinanceRunner:
             self.on_ok, self.on_edit, self.on_cancel, self.on_redo))
 
     def on_ok(self):
+        debug_log('finance: confirm accepted; scheduling save')
         ui.delay(self.do_ok, 0.3)
 
     @_guarded
     def do_ok(self):
+        debug_log('finance: do_ok start db=%s' % self.db.get('name'))
         ok, msg, row_id = fw.save_record(self.db['path'], self.rec)
+        debug_log('finance: save_record returned ok=%s row_id=%s' % (ok, row_id))
         if ok:
             self.saved = True
             self.lines.append(ft.format_saved_line(self.rec, self.db['name']))
