@@ -396,6 +396,8 @@ class MainView(ui.View):
         """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
         self._active_flow = finance_flow if self.mode_ctl.mode == modes.ACCOUNTS else assistant_flow
         if self._active_flow is finance_flow:
+            if finance_flow.ask_date_first(self, text):
+                return
             self.start_request(text, text)
             return
         local_list = assistant_flow.local_list_action(text, self._turns)

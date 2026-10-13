@@ -12,6 +12,7 @@
 callback ทั้งหมดเป็น bound method และเปิดป๊อปอัปถัดไปด้วย ui.delay(เมธอด, 0.3) ตามบทเรียนกันล่ม
 """
 import datetime
+import re
 
 import ui
 import console
@@ -65,6 +66,84 @@ def _system_prompt(ctx):
             % ai_client._calendar_lines(now))
     return head + ft.system_message(ctx['lists'], ctx['db']['name'], now.date())['content']
 
+
+_DATE_WORDS = ('วันนี้', 'เมื่อวาน', 'เมื่อวานนี้', 'เมื่อวานซืน', 'พรุ่งนี้', 'มะรืน',
+               'เดือนนี้', 'เดือนก่อน', 'เดือนหน้า')
+_FINANCE_ACTION_WORDS = ('จ่าย', 'ชำระ', 'ซื้อ', 'เสียค่า', 'ค่าเช่า', 'ค่าไฟ', 'ค่าน้ำ',
+                         'ได้รับ', 'รับเงิน', 'เงินเดือน', 'รายรับ', 'ขาย', 'ปันผล', 'ดอกเบี้ย')
+
+def _has_date_mention(text):
+    value = str(text or '').translate(ft._DIGITS)
+    if any(word in value for word in _DATE_WORDS):
+        return True
+    if re.search(r'\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b', value):
+        return True
+    if re.search(r'(?<!\d)\d{1,2}[-/.]\d{1,2}(?:[-/.]\d{2,4})?(?!\d)', value):
+        return True
+    if re.search(r'(?<!\d)\d{1,2}\s*(?:มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|ม\.?ค\.?|ก\.?พ\.?|มี\.?ค\.?|เม\.?ย\.?|พ\.?ค\.?|มิ\.?ย\.?|ก\.?ค\.?|ส\.?ค\.?|ก\.?ย\.?|ต\.?ค\.?|พ\.?ย\.?|ธ\.?ค\.?)(?:\s*\d{2,4})?', value):
+        return True
+    return False
+
+def _looks_like_undated_transaction(text):
+    value = str(text or '').translate(ft._DIGITS).lower()
+    has_amount = bool(re.search(r'(?<![\w])\d[\d,]*(?:\.\d+)?\s*(?:บาท|พัน|หมื่น|แสน|ล้าน|k)?', value))
+    has_action = any(word in value for word in _FINANCE_ACTION_WORDS)
+    return has_amount and has_action and not _has_date_mention(value)
+
+def ask_date_first(host, text):
+    """ถามวันที่ในแอปก่อนเรียก AI สำหรับคำสั่งรับ/จ่ายเงินที่ยังไม่มีวันที่."""
+    if not _looks_like_undated_transaction(text):
+        return False
+    FinanceDatePreflight(host, text).show()
+    return True
+
+class FinanceDatePreflight:
+    def __init__(self, host, text):
+        self.host = host
+        self.text = text
+        self.value = ''
+
+    def show(self):
+        today = datetime.date.today()
+        title = 'ไม่ได้บอกวันที่ ใช้วันนี้ใช่ไหม?\n(%s)' % ft.format_day_text(today)
+        self.host.show_overlay(ChoiceOverlay(
+            title, [('ใช่ วันนี้', 'today'), ('ระบุวันที่', 'set')],
+            self.on_pick, lambda: None))
+
+    def on_pick(self, value):
+        self.value = value
+        ui.delay(self.do_pick, 0.3)
+
+    def do_pick(self):
+        if self.value == 'today':
+            self._start(datetime.date.today())
+            return
+        self._show_date_input('')
+
+    def _show_date_input(self, initial):
+        self.host.show_overlay(TextInputOverlay(
+            'พิมพ์วันที่ เช่น เมื่อวาน หรือ 5 ต.ค. 2569', initial,
+            self.on_date_text, lambda: None))
+
+    def on_date_text(self, value):
+        self.value = value
+        ui.delay(self.do_date_text, 0.3)
+
+    def do_date_text(self):
+        day = ft.parse_date_text(self.value)
+        if day is None:
+            self._show_date_input(self.value)
+            return
+        try:
+            ft.check_date(day)
+        except ft.FinanceToolError:
+            self._show_date_input(self.value)
+            return
+        self._start(day)
+
+    def _start(self, day):
+        sent_text = '%s (วันที่ %s)' % (self.text, day.isoformat())
+        self.host.start_request(self.text, sent_text)
 
 def ask_ai(sent_text, on_chunk, token, model, history):
     """คืน (text, tool_calls); ปัญหาของไฟล์/โครงสร้างคืนเป็นข้อความแจ้ง (_note) ไม่ raise"""
