@@ -246,10 +246,13 @@ def stream_chat(user_text, on_chunk, token, model=None, history=None):
     return ''.join(parts)
 
 
-def stream_chat_with_tools(user_text, on_chunk, token, tools, model=None, history=None):
+def stream_chat_with_tools(user_text, on_chunk, token, tools, model=None, history=None,
+                           system_prompt=None):
     """เหมือน stream_chat แต่เปิดให้ AI เรียกเครื่องมือ (tool calling) ได้
 
     tools: list ของ tool schema (เช่น tools.ALL_TOOLS จาก tools.py)
+    system_prompt: ข้อความ system ทั้งก้อนที่ใช้แทนค่าเริ่มต้น (ของโหมดเตือนความจำ) — โหมดอื่น เช่น รายรับรายจ่าย
+      ใช้ส่งของตัวเอง; ไม่ส่ง (None) = พฤติกรรมเดิมทุกอย่าง
     คืนค่า: (text, tool_calls)
       text = ข้อความที่ AI พิมพ์ตอบปกติ (อาจว่างถ้า AI เลือกเรียกเครื่องมือล้วน ๆ)
       tool_calls = list ของ dict {'id':.., 'name':.., 'arguments': dict}
@@ -266,7 +269,8 @@ def stream_chat_with_tools(user_text, on_chunk, token, tools, model=None, histor
         'tools': tools,
         'tool_choice': 'auto',
         'messages': (
-            [{'role': 'system', 'content': _system_prompt(tools_enabled=True)}]
+            [{'role': 'system', 'content': (system_prompt if system_prompt is not None
+                                            else _system_prompt(tools_enabled=True))}]
             + list(history or [])
             + [{'role': 'user', 'content': user_text}]
         ),
