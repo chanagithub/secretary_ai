@@ -30,6 +30,9 @@ HINT_TEXT = 'พิมพ์ หรือกดไมค์บนคีย์บ
 class MainView(ui.View):
     def __init__(self):
         super().__init__()
+        debug_log('ui: build=v24 app=%s reminder_create=%s wake_duration=%s' %
+                  (__file__, getattr(reminder_create, '__file__', '?'),
+                   getattr(wake_duration, '__file__', '?')))
         self.name = 'AI เลขาส่วนตัว'
         self.background_color = 'white'
         self._overlay = None
@@ -403,6 +406,7 @@ class MainView(ui.View):
             self.start_request(text, text)
             return
         create_call = reminder_create.parse_request(text)
+        debug_log('ui: reminder_create matched=%s' % bool(create_call))
         if create_call is not None:
             self._live = {'time': config.now_text(), 'model': config.get_current_model(),
                           'user': text, 'ai': '', 'status': 'live'}
