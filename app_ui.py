@@ -5,8 +5,8 @@
 รันไฟล์นี้ใน Pythonista (ต้องมี config.py, ai_client.py, chat_views.py, overlays.py,
 assistant_flow.py, tools.py, date_guard.py, reminders_tool.py อยู่โฟลเดอร์เดียวกัน)
 """
-# ===== BUILD MARKER: ถ้าไม่เห็น v27 แสดงว่ายังรันไฟล์เก่า =====
-BUILD = 'v27'
+# ===== BUILD MARKER: ถ้าไม่เห็น v28 แสดงว่ายังรันไฟล์เก่า =====
+BUILD = 'v28'
 print('>>> app_ui BUILD=%s file=%s' % (BUILD, __file__))
 
 import threading
@@ -30,8 +30,10 @@ from debug_log import log as debug_log
 # บันทึกทันทีตอน import สำเร็จ (ก่อนเปิดหน้าจอ)
 debug_log('ui: BUILD=%s loaded app=%s' % (BUILD, __file__))
 debug_log('ui: reminder_create=%s' % getattr(reminder_create, '__file__', '?'))
+debug_log('ui: reminder_create BUILD=%s' % getattr(reminder_create, 'BUILD', '?'))
 debug_log('ui: wake_duration=%s' % getattr(wake_duration, '__file__', '?'))
 debug_log('ui: assistant_flow=%s' % getattr(assistant_flow, '__file__', '?'))
+debug_log('ui: assistant_flow BUILD=%s' % getattr(assistant_flow, 'BUILD', '?'))
 
 HINT_TEXT = '[%s] พิมพ์ หรือกดไมค์บนคีย์บอร์ดเพื่อพูด แล้วกดส่ง' % BUILD
 

@@ -1,12 +1,13 @@
 """Recognize clear reminder-creation requests before AI can classify them as searches."""
 # ===== BUILD MARKER =====
-BUILD = "v27"
+BUILD = "v28"
 print(">>> reminder_create BUILD=%s file=%s" % (BUILD, __file__))
 
 import datetime
 import re
 
 import wake_duration
+from debug_log import log as debug_log
 
 
 _CREATE = re.compile(
@@ -251,19 +252,27 @@ def parse_request(text, now=None):
     """
     raw = str(text or '').strip()
     if not raw:
+        debug_log('reminder_create BUILD=%s empty_input' % BUILD)
         return None
     if any(phrase in raw for phrase in _NEGATED):
+        debug_log('reminder_create BUILD=%s rejected=negated' % BUILD)
         return None
-    if not has_create_intent(raw):
+    intent = has_create_intent(raw)
+    if not intent:
+        debug_log('reminder_create BUILD=%s intent=False' % BUILD)
         return None
 
     title = _title_from(raw)
     if not title:
+        debug_log('reminder_create BUILD=%s intent=True title=False' % BUILD)
         return None
 
     due = _relative_due(raw, now)
+    relative_found = due is not None
     if due is None:
         due = _absolute_due(raw, now)
+    debug_log('reminder_create BUILD=%s intent=True title=True relative=%s absolute=%s'
+              % (BUILD, relative_found, due is not None))
     if due is None:
         # มี intent สร้างชัดเจนแต่ยังไม่มีวัน/เวลาครบ → ไม่ส่งไป list/search
         # คืน None เพื่อให้ flow ถัดไป (guided / AI) ถามช่องที่ขาด

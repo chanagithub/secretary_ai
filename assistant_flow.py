@@ -26,6 +26,10 @@ import tools
 from overlays import ConfirmOverlay, ChoiceOverlay, NoTimeConfirmOverlay
 from debug_log import log as debug_log
 
+BUILD = 'v28'
+debug_log('assistant_flow BUILD=%s loaded module=%s reminder_create BUILD=%s' %
+          (BUILD, __file__, getattr(reminder_create, 'BUILD', '?')))
+
 # ---------- 1) ความกำกวมของชื่อวัน ----------
 def find_ambiguous_weekday(text):
     """คืน info ถ้าต้องถามผู้ใช้ก่อน ไม่งั้นคืน None"""
@@ -122,6 +126,7 @@ def local_list_action(text, turns=None):
     # Keep explicit create requests out of the local list path, even when the
     # reminder parser still needs to ask for a missing or ambiguous detail.
     if reminder_create.has_create_intent(text):
+        debug_log('assistant_flow BUILD=%s local_list blocked=create_intent' % BUILD)
         return None
     # [v12] คำถามค้นตามหัวข้อ (เช่น "ได้ปันผลมากี่รายการ") ให้ reminder_search จัดการ
     # กันคำว่า "รายการ" ใน "กี่รายการ" ทำให้กลายเป็นดูรายการรายวัน
