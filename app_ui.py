@@ -5,8 +5,8 @@
 รันไฟล์นี้ใน Pythonista (ต้องมี config.py, ai_client.py, chat_views.py, overlays.py,
 assistant_flow.py, tools.py, date_guard.py, reminders_tool.py อยู่โฟลเดอร์เดียวกัน)
 """
-# ===== BUILD MARKER: ถ้าไม่เห็น v29 แสดงว่ายังรันไฟล์เก่า =====
-BUILD = 'v29'
+# ===== BUILD MARKER: ถ้าไม่เห็น v30 แสดงว่ายังรันไฟล์เก่า =====
+BUILD = 'v30'
 print('>>> app_ui BUILD=%s file=%s' % (BUILD, __file__))
 
 import threading
@@ -422,6 +422,9 @@ class MainView(ui.View):
         create_call = reminder_create.parse_request(text)
         debug_log('ui: BUILD=%s reminder_create matched=%s call=%s' % (
             BUILD, bool(create_call), create_call))
+        if create_call is None and ('เตือน' in text or 'แจ้งเตือน' in text):
+            # Temporary, narrowly scoped diagnostic for reminder parser failures.
+            debug_log('ui: unmatched reminder input=%r' % text)
         if create_call is not None:
             self._live = {'time': config.now_text(), 'model': config.get_current_model(),
                           'user': text, 'ai': '', 'status': 'live'}
