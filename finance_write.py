@@ -54,7 +54,7 @@ def _prepare(rec):
     date_str = str(rec.get('date') or '')
     debug_log('finance_write: prepare date text type=%s' % type(rec.get('date')).__name__)
     try:
-        day = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+        day = datetime.date.fromisoformat(date_str)
     except ValueError:
         raise _Refused('วันที่ไม่ถูกต้อง (%s)' % date_str)
     debug_log('finance_write: prepare date parsed')

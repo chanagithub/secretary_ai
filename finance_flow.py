@@ -231,11 +231,11 @@ class FinanceRunner:
 
     def show_list_pick(self, which):
         if which == 'category':
-            items = [(name, cid) for cid, name in self.lists[self._cat_key()]]
+            items = [(name, (cid, name)) for cid, name in self.lists[self._cat_key()]]
             title = 'เลือกหมวด%s' % ft.kind_text(self.rec['kind'])
             callback = self.on_category_pick
         else:
-            items = [(name, pid) for pid, name in self.lists['payment_type']]
+            items = [(name, (pid, name)) for pid, name in self.lists['payment_type']]
             title = 'เลือกประเภทการชำระ'
             callback = self.on_payment_pick
         if not items:
@@ -259,8 +259,7 @@ class FinanceRunner:
 
     @_guarded
     def do_category_pick(self):
-        self.rec['category_id'] = self._pick
-        self.rec['category_name'] = self._name_of(self.lists[self._cat_key()], self._pick)
+        self.rec['category_id'], self.rec['category_name'] = self._pick
         self.ask_next()
 
     def on_payment_pick(self, value):
@@ -269,8 +268,7 @@ class FinanceRunner:
 
     @_guarded
     def do_payment_pick(self):
-        self.rec['payment_id'] = self._pick
-        self.rec['payment_name'] = self._name_of(self.lists['payment_type'], self._pick)
+        self.rec['payment_id'], self.rec['payment_name'] = self._pick
         self.ask_next()
 
     # ----- ยืนยันสุดท้าย -----
