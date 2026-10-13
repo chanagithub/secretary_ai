@@ -1,0 +1,680 @@
+"""app_ui.py - หน้าจอหลักของ AI เลขาส่วนตัว (UI + เชื่อมเฟส 1 เตือนความจำ)
+
+ตั้งชื่อ app_ui แทน ui เพราะชื่อ ui จะไปบังโมดูล ui ของ Pythonista
+ลำดับงานกับ AI (เลือกวัน, tool calling, ยืนยัน, บันทึก) อยู่ใน assistant_flow.py
+รันไฟล์นี้ใน Pythonista (ต้องมี config.py, ai_client.py, chat_views.py, overlays.py,
+assistant_flow.py, tools.py, date_guard.py, reminders_tool.py อยู่โฟลเดอร์เดียวกัน)
+"""
+import threading
+
+import ui
+import dialogs
+import console
+import config
+import ai_client
+import assistant_flow
+import reminder_create
+import wake_duration
+import finance_flow
+import modes
+import search_terms
+from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
+from overlays import ChoiceOverlay
+from mode_flow import ModeController
+from debug_log import log as debug_log
+
+
+HINT_TEXT = 'พิมพ์ หรือกดไมค์บนคีย์บอร์ดเพื่อพูด แล้วกดส่ง'
+
+
+class MainView(ui.View):
+    def __init__(self):
+        super().__init__()
+        self.name = 'AI เลขาส่วนตัว'
+        self.background_color = 'white'
+        self._overlay = None
+        self._token = None  # งานที่กำลังรอ AI อยู่ (None = ว่าง)
+        self._chat_id = None  # แชทที่เปิดอยู่ (None = ยังไม่มีข้อความแรก)
+        self._turns = []      # รอบถามตอบของแชทที่เปิดอยู่
+        self._live = None     # รอบที่กำลังรอ AI ตอบ
+        self._pending_worker_result = None
+        self._pending_actions = None
+        self._action_base_text = ''
+        self._action_runner = None
+        self._keep_context = False  # True = รอบนี้ AI ถามเวลา ต้องจำไว้ให้รอบถัดไป
+        self._active_flow = assistant_flow
+        self._reminder_snapshot = []  # หมายเลขรายการล่าสุดที่ผู้ใช้เห็น ใช้กับคำสั่งต่อเนื่อง
+        self._scroll_scheduled = False
+
+        self.mode_ctl = ModeController(self)  # แถบปุ่มโหมด (ดู mode_flow.py)
+        self.add_subview(self.mode_ctl.bar)
+
+        self.model_btn = ui.Button()
+        self.model_btn.font = ('<system>', 14)
+        self.model_btn.border_width = 1
+        self.model_btn.border_color = '#c7c7cc'
+        self.model_btn.corner_radius = 8
+        self.model_btn.action = self.show_model_picker
+        self.add_subview(self.model_btn)
+
+        self.history_btn = ui.Button()
+        self.history_btn.title = 'ประวัติ'
+        self.history_btn.font = ('<system>', 14)
+        self.history_btn.border_width = 1
+        self.history_btn.border_color = '#c7c7cc'
+        self.history_btn.corner_radius = 8
+        self.history_btn.action = self.show_history_picker
+        self.add_subview(self.history_btn)
+
+        self.input = ui.TextView()
+        self.input.font = ('<system>', 17)
+        self.input.border_width = 1
+        self.input.border_color = '#c7c7cc'
+        self.input.corner_radius = 8
+        self.add_subview(self.input)
+
+        self.send_btn = ui.Button()
+        self.send_btn.title = 'ส่ง'
+        self.send_btn.font = ('<system-bold>', 17)
+        self.send_btn.background_color = '#007aff'
+        self.send_btn.tint_color = 'white'
+        self.send_btn.corner_radius = 10
+        self.send_btn.action = self.send
+        self.add_subview(self.send_btn)
+
+        self.output = ui.TextView()
+        self.output.editable = False
+        self.output.font = ('<system>', 18)
+        self.output.scroll_enabled = True
+        self.add_subview(self.output)
+
+        self.right_button_items = [
+            ui.ButtonItem(title='คำค้น', action=self.show_search_terms),
+            ui.ButtonItem(title='แชทเก่า', action=self.show_chats),
+            ui.ButtonItem(title='เริ่มใหม่', action=self.new_chat)]
+
+        self.refresh_model_button()
+        self.render()
+
+    def layout(self):
+        m = 12
+        w, h = self.width, self.height
+        self.mode_ctl.bar.frame = (m, m, w - 2 * m, 36)
+        top = 52  # แถวถัดไปเลื่อนลงจากแถบโหมด
+        self.model_btn.frame = (m, top + m, w - 3 * m - 76, 36)
+        self.history_btn.frame = (w - m - 76, top + m, 76, 36)
+        self.input.frame = (m, top + 56, w - 2 * m, 120)
+        self.send_btn.frame = (m, top + 184, w - 2 * m, 44)
+        self.output.frame = (m, top + 240, w - 2 * m, max(h - top - 252, 50))
+
+    def refresh_model_button(self):
+        self.model_btn.title = 'โมเดล: %s  ▾' % config.get_current_model()
+
+    # ---------- พจนานุกรมคำค้น Reminder ----------
+    def show_search_terms(self, sender):
+        if self._busy_warning():
+            return
+        topics = search_terms.load()
+        table = ui.TableView()
+        table.name = 'พจนานุกรมคำค้น'
+        table.row_height = 58
+
+        def refresh():
+            source.items[:] = [
+                {'title': name, 'subtitle': 'แตะเพื่อดูคำถามและคำค้น'}
+                for name, body in topics.items()]
+            table.reload()
+
+        def on_pick(ds_sender):
+            row = ds_sender.selected_row
+            if isinstance(row, tuple):
+                row = row[1]
+            if row is None or row < 0 or row >= len(source.items):
+                return
+            name = source.items[row]['title']
+            body = topics[name]
+            details = ('“ถามว่า” = สำนวนที่ทำให้ระบบเลือกหัวข้อนี้\n%s\n\n'
+                       '“ค้นหา” = คำที่ใช้เทียบกับชื่อ/รายละเอียด Reminder\n%s' % (
+                           ', '.join(body.get('triggers', [])) or '(ไม่มี)',
+                           ', '.join(body.get('terms', [])) or '(ไม่มี)'))
+            try:
+                # console.alert คืน "ลำดับปุ่ม" (1,2,3) ไม่ใช่ข้อความปุ่ม; Cancel เด้งออกเป็น KeyboardInterrupt
+                choice = console.alert(name, details, 'แก้ไข', 'ลบ')  # Cancel ใช้แทนปุ่มปิด
+            except KeyboardInterrupt:
+                return
+            if choice == 1:
+                self._edit_search_topic(topics, name, refresh)
+            elif choice == 2:
+                try:
+                    console.alert('ลบหัวข้อ?', 'ลบ "%s" และคำค้นทั้งหมด' % name, 'ลบ')
+                except KeyboardInterrupt:  # กดยกเลิก
+                    return
+                if True:
+                    updated = dict(topics)
+                    updated.pop(name, None)
+                    try:
+                        topics.clear(); topics.update(search_terms.save(updated))
+                        refresh()
+                        console.hud_alert('ลบหัวข้อแล้ว', 'success', 1.2)
+                    except (ValueError, OSError) as e:
+                        console.hud_alert(str(e), 'error', 2)
+
+        def on_add(btn):
+            self._edit_search_topic(topics, None, refresh)
+
+        def on_time_words(btn):
+            self._edit_search_time_words(topics)
+
+        source = ui.ListDataSource([])
+        source.action = on_pick
+        table.data_source = source
+        table.delegate = source
+        table.right_button_items = [
+            ui.ButtonItem(title='คำบอกเวลา', action=on_time_words),
+            ui.ButtonItem(title='+ เพิ่ม', action=on_add)]
+        refresh()
+        table.present('sheet')
+
+    def _edit_search_topic(self, topics, old_name, on_saved):
+        old = topics.get(old_name, {}) if old_name else {}
+        try:
+            name = dialogs.input_alert('ชื่อหัวข้อ', 'เช่น หาหมอ, สังสรรค์, ปันผล',
+                                       old_name or '', 'ต่อไป').strip()
+            if not name:
+                return
+            if name in topics and name != old_name:
+                console.hud_alert('มีหัวข้อนี้แล้ว เลือกชื่ออื่น', 'error', 2)
+                return
+            triggers = dialogs.input_alert(
+                'คำที่ผู้ใช้อาจถาม', 'คั่นแต่ละคำด้วยจุลภาค',
+                ', '.join(old.get('triggers', [])), 'ต่อไป')
+            terms = dialogs.input_alert(
+                'คำที่ใช้ค้นใน Reminder', 'คั่นแต่ละคำด้วยจุลภาค',
+                ', '.join(old.get('terms', [])), 'บันทึก')
+        except KeyboardInterrupt:
+            return
+        updated = dict(topics)
+        if old_name and old_name != name:
+            updated.pop(old_name, None)
+        updated[name] = {'ถามว่า': triggers, 'ค้นหา': terms}
+        try:
+            topics.clear(); topics.update(search_terms.save(updated))
+            on_saved()
+            console.hud_alert('บันทึกหัวข้อแล้ว', 'success', 1.2)
+        except (ValueError, OSError) as e:
+            console.hud_alert(str(e), 'error', 2)
+
+    def _edit_search_time_words(self, topics):
+        words = search_terms.load_when_words()
+        labels = [('past', 'คำที่หมายถึงรายการที่ผ่านมา/เสร็จแล้ว'),
+                  ('last_month', 'คำที่หมายถึงช่วงเดือนก่อน'),
+                  ('last_year', 'คำที่หมายถึงช่วงปีที่แล้ว'),
+                  ('all', 'คำที่ขอดูทั้งหมด'),
+                  ('upcoming', 'คำที่ขอดูเฉพาะรายการที่ยังไม่ถึง')]
+        try:
+            for key, title in labels:
+                words[key] = dialogs.input_alert(
+                    title, 'คั่นแต่ละคำด้วยจุลภาค', ', '.join(words[key]), 'ต่อไป')
+        except KeyboardInterrupt:
+            return
+        try:
+            search_terms.save(topics, words)
+            console.hud_alert('บันทึกคำบอกเวลาแล้ว', 'success', 1.2)
+        except (ValueError, OSError) as e:
+            console.hud_alert(str(e), 'error', 2)
+
+    # ---------- เลือก/เพิ่มโมเดล ----------
+    def _picker_items(self):
+        current = config.get_current_model()
+        return [{'title': m,
+                 'accessory_type': 'checkmark' if m == current else 'none'}
+                for m in config.get_models()]
+
+    def show_model_picker(self, sender):
+        table = ui.TableView()
+        table.name = 'เลือกโมเดล'
+        ds = ui.ListDataSource(self._picker_items())
+        ds.font = ('<system>', 15)
+
+        def on_pick(ds_sender):
+            model = ds_sender.items[ds_sender.selected_row]['title']
+            config.set_current_model(model)
+            self.refresh_model_button()
+            table.close()
+
+        def on_add(btn):
+            try:
+                text = dialogs.input_alert(
+                    'เพิ่มโมเดล',
+                    'ชื่อโมเดลจาก OpenRouter เช่น openai/gpt-4o',
+                    '', 'เพิ่ม')
+            except KeyboardInterrupt:  # กดยกเลิก
+                return
+            ok, result = config.add_model(text)
+            if not ok:
+                console.hud_alert(result, 'error', 2)
+                return
+            self.refresh_model_button()
+            table.close()
+
+        ds.action = on_pick
+        table.data_source = ds
+        table.delegate = ds
+        table.right_button_items = [ui.ButtonItem(title='+ เพิ่ม', action=on_add)]
+        table.present('sheet')
+
+    # ---------- ประวัติคำสั่ง ----------
+    def show_history_picker(self, sender):
+        if self._token is not None:
+            console.hud_alert('รอ AI ตอบหรือกดหยุดก่อน', 'error', 1.5)
+            return
+        items = config.get_history()
+        if not items:
+            console.hud_alert('ยังไม่มีประวัติ', 'error', 1.2)
+            return
+
+        table = ui.TableView()
+        table.name = 'ประวัติคำสั่ง'
+        table.row_height = 64
+
+        def on_pick(text):
+            self.input.text = text
+            table.close()
+
+            def focus_input():
+                self.input.begin_editing()
+                try:  # เลื่อนเคอร์เซอร์ไปท้ายข้อความ (นับเป็นหน่วย UTF-16)
+                    end = len(text.encode('utf-16-le')) // 2
+                    self.input.selected_range = (end, end)
+                except ValueError:
+                    pass
+            ui.delay(focus_input, 0.4)
+
+        def on_clear(btn):
+            try:
+                console.alert('ล้างประวัติทั้งหมด?',
+                              'ลบคำสั่งที่เคยส่งทั้งหมด', 'ล้าง')
+            except KeyboardInterrupt:  # กดยกเลิก
+                return
+            config.clear_history()
+            source.items[:] = []
+            table.reload()
+
+        source = HistorySource(items, on_pick)
+        table.data_source = source
+        table.delegate = source
+        table.right_button_items = [
+            ui.ButtonItem(title='ล้างทั้งหมด', action=on_clear)]
+        table.present('sheet')
+
+    # ---------- ส่งคำสั่ง + ยืนยัน ----------
+    def render(self):
+        debug_log('ui: render start')
+        turns = list(self._turns)
+        if self._live is not None:
+            turns.append(self._live)
+        if not turns:
+            self.output.text = HINT_TEXT
+            return
+        debug_log('ui: render calling format_chat')
+        self.output.text = format_chat(turns)
+        debug_log('ui: render set output.text done')
+        self._scroll_to_bottom()
+        if not self._scroll_scheduled:
+            self._scroll_scheduled = True
+            ui.delay(self._scroll_after_layout, 0.15)
+        debug_log('ui: render after _scroll_to_bottom')
+        debug_log('ui: render end')
+        
+
+    def _scroll_to_bottom(self):
+        try:
+            y = self.output.content_size[1] - self.output.height
+            self.output.content_offset = (0, max(y, 0))
+        except Exception:  # ถ้า TextView ไม่รองรับ ก็แค่ไม่เลื่อนอัตโนมัติ
+            pass
+
+    def _scroll_after_layout(self):
+        self._scroll_scheduled = False
+        if self.output is not None:
+            self._scroll_to_bottom()
+
+    def send(self, sender):
+        # ระหว่างรอ AI ปุ่มนี้กลายเป็นปุ่ม "หยุด"
+        if self._token is not None:
+            self.stop()
+            return
+        if self._popup_open():
+            return
+        text = self.input.text.strip()
+        if not text:
+            console.hud_alert('พิมพ์หรือพูดคำสั่งก่อน', 'error', 1.2)
+            return
+        self.input.end_editing()
+        config.add_history(text)
+        self.begin_request(text)
+
+    def _set_busy(self, busy):
+        if busy:
+            self.send_btn.title = 'หยุด'
+            self.send_btn.background_color = '#ff3b30'
+        else:
+            self.send_btn.title = 'ส่ง'
+            self.send_btn.background_color = '#007aff'
+
+    def _memory_messages(self):
+        """ข้อความที่ให้ AI จำ: MEMORY_PAIRS คู่ล่าสุดที่สำเร็จ (ไม่รวมรอบที่หยุด/ผิดพลาด)
+
+        นับเฉพาะรอบหลังรอบล่าสุดที่มีการเรียกเครื่องมือ (turn['tool']) เหมือนตอนทดสอบ
+        ใช้ข้อความที่ส่งให้ AI จริง (turn['sent'], มีวันที่ที่ผู้ใช้เลือกต่อท้าย) ถ้ามี
+        """
+        done = []
+        for t in reversed(self._turns):
+            if t.get('tool'):
+                break
+            if t.get('status') == 'ok' and (t.get('ai') or '').strip():
+                done.append(t)
+        done.reverse()
+        messages = []
+        for t in done[-config.MEMORY_PAIRS:]:
+            messages.append({'role': 'user',
+                             'content': t.get('sent') or t.get('user', '')})
+            messages.append({'role': 'assistant', 'content': t['ai']})
+        if self._reminder_snapshot:
+            rows = []
+            for i, item in enumerate(self._reminder_snapshot, 1):
+                rows.append('%d. %s — %s' % (i, item['due'].strftime('%Y-%m-%d %H:%M'), item['title']))
+            messages.append({'role': 'system', 'content':
+                'รายการเตือนล่าสุดที่แสดงให้ผู้ใช้เห็น (ใช้หมายเลขนี้เท่านั้นเมื่อสั่งเลื่อน/เสร็จ/ลบ):\n' + '\n'.join(rows)})
+        return messages
+
+    def begin_request(self, text):
+        """ตรวจว่าเรื่องที่พูดตรงกับโหมดไหม (mode_flow) แล้วค่อยทำงานต่อ"""
+        if self.mode_ctl.check(text):  # ขึ้นป๊อปอัปถามโหมดแล้ว รอผู้ใช้เลือก
+            return
+        self.begin_request_unchecked(text)
+
+    def begin_request_unchecked(self, text):
+        """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
+        self._active_flow = finance_flow if self.mode_ctl.mode == modes.ACCOUNTS else assistant_flow
+        if self._active_flow is finance_flow:
+            if finance_flow.ask_date_first(self, text):
+                return
+            self.start_request(text, text)
+            return
+        create_call = reminder_create.parse_request(text)
+        if create_call is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            actions = assistant_flow.prepare_actions([create_call], self)
+            self._run_actions('', actions)
+            return
+        wake_call = wake_duration.parse_relative_wake(text)
+        if wake_call is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            actions = assistant_flow.prepare_actions([wake_call], self)
+            self._run_actions('', actions)
+            return
+        local_list = assistant_flow.local_list_action(text, self._turns)
+        if local_list is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            self._run_actions('', [local_list])
+            return
+        local_action = assistant_flow.local_reminder_action(
+            text, self._turns, self._reminder_snapshot)
+        if local_action is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            self._run_actions('', [local_action])
+            return
+        info = assistant_flow.find_ambiguous_weekday(text)
+        if not info:
+            self.start_request(text, text)
+            return
+        title, options = assistant_flow.weekday_choice(info)
+
+        def on_pick(choice):
+            self.start_request(text, assistant_flow.apply_choice(text, info, choice))
+
+        overlay = ChoiceOverlay(title, options, on_pick, lambda: None)
+        self.show_overlay(overlay)
+
+    def start_request(self, text, sent_text):
+        token = ai_client.CancelToken()
+        self._token = token
+        model = config.get_current_model()
+        history = self._memory_messages()  # เก็บก่อนเพิ่มข้อความใหม่
+        self._live = {'time': config.now_text(), 'model': model,
+                      'user': text, 'ai': '', 'status': 'live'}
+        if sent_text != text:
+            self._live['sent'] = sent_text
+        self._set_busy(True)
+        self.render()
+        received = []
+
+        def on_chunk(piece):
+            # รับชิ้นข้อความไว้ก่อน แล้วแสดงผลครั้งเดียวเมื่อคำตอบจบ
+            received.append(piece)
+
+        def worker():
+            error = None
+            calls = []
+            try:
+                _, calls = self._active_flow.ask_ai(
+                    sent_text, on_chunk, token, model, history)
+            except ai_client.AIError as e:
+                error = str(e)
+            except Exception as e:
+                error = 'เกิดข้อผิดพลาดที่ไม่คาดคิด: %s' % e
+            final = ''.join(received)
+            self._pending_worker_result = (token, final, calls, error)
+            ui.delay(self._deliver_worker_result, 0)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _deliver_worker_result(self):
+        result = self._pending_worker_result
+        self._pending_worker_result = None
+        if result is not None:
+            self._on_done(*result)
+
+    def _on_progress(self, token, text):
+        if token is not self._token or self._live is None:
+            return
+        self._live['ai'] = text
+        self.render()
+
+    def _finish_turn(self, text, status, error=None, tool=False):
+        debug_log('ui: _finish_turn start')
+        turn = self._live
+        self._live = None
+        turn['ai'] = text
+        turn['status'] = status
+        if error:
+            turn['error'] = error
+        if tool:
+            turn['tool'] = True
+        if self._chat_id is None:
+            self._chat_id = config.new_chat_id()
+        self._turns.append(turn)
+
+        debug_log('ui: _finish_turn before append_turn')
+        try:
+            config.append_turn(self._chat_id, turn)
+            debug_log('ui: _finish_turn append_turn success')
+        except Exception as e:
+            debug_log('ui: _finish_turn append_turn error: %s' % e)
+            console.hud_alert('บันทึกแชทลงไฟล์ไม่สำเร็จ', 'error', 2)
+
+        debug_log('ui: _finish_turn before delayed render')
+        ui.delay(self.render, 0.1)
+        debug_log('ui: _finish_turn end')
+
+
+    def _on_done(self, token, text, calls, error):
+        if token is not self._token:  # ถูกกดหยุดไปแล้ว
+            return
+        self._token = None
+        self._set_busy(False)
+        if error:
+            self._finish_turn(text, 'error', error)
+            return
+        if not calls:  # AI ตอบเป็นข้อความ (หรือถามกลับ)
+            self._finish_turn(text, 'ok')
+            self.input.text = ''
+            return
+        # เมื่อมี tool call ให้แอปเป็นผู้แสดงผลภาษาไทยจากผลจริงของเครื่องมือ
+        # ไม่แสดงข้อความอิสระที่โมเดลอาจส่งมาปน (เช่นคำอธิบายภาษาอังกฤษ)
+        self._run_actions('', self._active_flow.prepare_actions(calls, self))
+
+    def _run_actions(self, ai_text, actions):
+        """เริ่มลำดับยืนยัน/บันทึก โดยใช้เมธอดของ MainView เป็น callback"""
+        self._action_base_text = ai_text.strip() if ai_text else ''
+        self._live['ai'] = ai_text or '(รอคุณยืนยัน)'
+        self.render()
+        self._pending_actions = list(actions)
+        ui.delay(self._start_action_flow, 0.2)
+
+    def _start_action_flow(self):
+        actions = self._pending_actions or []
+        self._pending_actions = None
+        self._active_flow.run_actions(self, actions, self._on_actions_done)
+
+    def _on_actions_done(self, lines, redo, saved):
+        debug_log('ui: on_actions_done start')
+        parts = []
+        if self._action_base_text:
+            parts.append(self._action_base_text)
+        parts.extend(str(line) for line in lines)
+        keep = self._keep_context
+        self._keep_context = False
+        self._finish_turn('\n'.join(parts), 'ok', tool=not keep)
+        debug_log('ui: on_actions_done after _finish_turn')
+        self._action_base_text = ''
+        try:
+            self.input.text = ''
+            self._scroll_to_bottom()
+        except Exception as e:
+            debug_log('ui: on_actions_done input update error: %r' % e)
+        if redo or keep:
+            ui.delay(self.input.begin_editing, 0.3)
+        debug_log('ui: on_actions_done end saved=%s' % saved)
+
+
+    def stop(self):
+        token = self._token
+        if token is None:
+            return
+        token.cancel()
+        text = self._live['ai'] if self._live else ''
+        self._token = None
+        self._set_busy(False)
+        self._finish_turn(text, 'stopped')
+
+    # ---------- เริ่มใหม่ / แชทเก่า ----------
+    def _busy_warning(self):
+        if self._token is not None or self._popup_open():
+            console.hud_alert('รอ AI ตอบหรือกดหยุดก่อน', 'error', 1.5)
+            return True
+        return False
+
+    def _reset_chat(self):
+        self._chat_id = None
+        self._turns = []
+        self._live = None
+        self._reminder_snapshot = []
+        self.render()
+
+    def new_chat(self, sender):
+        if self._busy_warning():
+            return
+        self._reset_chat()
+
+    def show_chats(self, sender):
+        if self._busy_warning():
+            return
+        chats = config.list_chats()
+        if not chats:
+            console.hud_alert('ยังไม่มีแชทเก่า', 'error', 1.2)
+            return
+
+        table = ui.TableView()
+        table.name = 'แชทเก่า'
+        table.row_height = 64
+
+        def on_pick(chat_id):
+            table.close()
+            ui.delay(lambda: self.show_chat_viewer(chat_id), 0.6)
+
+        def on_delete(chat_id):
+            config.delete_chat(chat_id)
+            if chat_id == self._chat_id:  # ลบแชทที่เปิดอยู่ ให้ล้างจอด้วย
+                self._reset_chat()
+
+        def on_clear(btn):
+            try:
+                console.alert('ล้างแชทเก่าทั้งหมด?',
+                              'ลบประวัติแชททั้งหมดและเริ่มแชทใหม่', 'ล้าง')
+            except KeyboardInterrupt:  # กดยกเลิก
+                return
+            config.clear_chats()
+            self._reset_chat()
+            source.chats[:] = []
+            table.reload()
+
+        source = ChatListSource(chats, on_pick, on_delete)
+        table.data_source = source
+        table.delegate = source
+        table.right_button_items = [
+            ui.ButtonItem(title='ล้างทั้งหมด', action=on_clear)]
+        table.present('sheet')
+
+    def show_chat_viewer(self, chat_id):
+        chat = config.get_chat(chat_id)
+        if chat is None:
+            console.hud_alert('ไม่พบแชทนี้', 'error', 1.5)
+            return
+        viewer = ChatViewer(chat, lambda: self._continue_chat(chat, viewer))
+        self._present_when_ready(viewer, 10)
+
+    def _present_when_ready(self, viewer, attempts):
+        """เปิดหน้าใหม่ทับ sheet ที่เพิ่งปิด: ถ้าแอนิเมชันยังไม่จบจะลองใหม่ทุก 0.3 วินาที"""
+        try:
+            viewer.present('sheet')
+        except ValueError:  # view is already being presented or animation
+            if attempts <= 0:
+                console.hud_alert('เปิดแชทไม่สำเร็จ ลองกดใหม่อีกครั้ง', 'error', 2)
+                return
+            ui.delay(lambda: self._present_when_ready(viewer, attempts - 1), 0.3)
+
+    def _continue_chat(self, chat, viewer):
+        if self._busy_warning():
+            return
+        self._chat_id = chat['id']
+        self._turns = [t for t in chat['turns'] if isinstance(t, dict)]
+        self._live = None
+        self._reminder_snapshot = []
+        viewer.close()
+        self.render()
+
+    # ---------- ป๊อปอัป ----------
+    def _popup_open(self):
+        return self._overlay is not None and self._overlay.superview is not None
+
+    def show_overlay(self, overlay):
+        """แสดงป๊อปอัปทับหน้าจอ (assistant_flow เรียกใช้)"""
+        self.input.end_editing()
+        overlay.frame = self.bounds
+        self._overlay = overlay
+        self.add_subview(overlay)
+
+
+def main():
+    view = MainView()
+    view.present('fullscreen')
+
+
+if __name__ == '__main__':
+    main()
