@@ -1,6 +1,6 @@
 """Recognize clear reminder-creation requests before AI can classify them as searches."""
 # ===== BUILD MARKER =====
-BUILD = "v29"
+BUILD = "v30"
 print(">>> reminder_create BUILD=%s file=%s" % (BUILD, __file__))
 
 import datetime
@@ -52,19 +52,47 @@ def _clean_text(text):
     return re.sub(r'\s+', ' ', value).strip()
 
 
+def _intent_key(text):
+    """Compact form for matching Thai command words despite mark variants."""
+    value = _clean_text(text)
+    value = ''.join(ch for ch in value
+                    if not unicodedata.category(ch).startswith('M'))
+    return re.sub(r'\s+', '', value)
+
+
+def _intent_key_with_positions(text):
+    """Return a markless compact string and source offsets for safe title slicing."""
+    chars = []
+    positions = []
+    for index, ch in enumerate(_clean_text(text)):
+        if ch.isspace() or unicodedata.category(ch).startswith('M'):
+            continue
+        chars.append(ch)
+        positions.append(index)
+    return ''.join(chars), positions
+
+
 def has_create_intent(text):
     """True for an explicit create-reminder phrase, even if its details are incomplete."""
     raw = _clean_text(text)
     compact = re.sub(r'\s+', '', raw)
     if any(phrase in raw or phrase.replace(' ', '') in compact for phrase in _NEGATED):
         return False
+    key = _intent_key(raw)
+    folded_triggers = (
+        'ชวยเตอนฉนวา', 'ชวยเตอนผมวา', 'ชวยเตอนเราวา',
+        'เตอนฉนวา', 'เตอนผมวา', 'เตอนเราวา',
+        'ชวยแจงเตอนฉนวา', 'ชวยแจงเตอนผมวา',
+        'แจงเตอนฉนวา', 'แจงเตอนผมวา',
+    )
     return bool(_CREATE.search(raw) or _CREATE_FLEX.search(raw)
                 or _USE_MESSAGE.search(raw)
                 or any(phrase in compact for phrase in (
                     'ช่วยเตือนฉันว่า', 'ช่วยเตือนผมว่า', 'ช่วยเตือนเราว่า',
                     'เตือนฉันว่า', 'เตือนผมว่า', 'เตือนเราว่า',
                     'ช่วยแจ้งเตือนฉันว่า', 'ช่วยแจ้งเตือนผมว่า',
-                    'แจ้งเตือนฉันว่า', 'แจ้งเตือนผมว่า')))
+                    'แจ้งเตือนฉันว่า', 'แจ้งเตือนผมว่า'))
+                or any(trigger in key for trigger in folded_triggers))
 
 
 def _number_value(value):
@@ -73,9 +101,25 @@ def _number_value(value):
 
 def _title_from(text):
     match = _USE_MESSAGE.search(text) or _CREATE.search(text) or _CREATE_FLEX.search(text)
-    if not match:
-        return None
-    body = match.group(1).strip()
+    if match:
+        body = match.group(1).strip()
+    else:
+        compact, positions = _intent_key_with_positions(text)
+        folded_prefixes = (
+            'ชวยเตอนฉนวา', 'ชวยเตอนผมวา', 'ชวยเตอนเราวา',
+            'เตอนฉนวา', 'เตอนผมวา', 'เตอนเราวา',
+            'ชวยแจงเตอนฉนวา', 'ชวยแจงเตอนผมวา',
+            'แจงเตอนฉนวา', 'แจงเตอนผมวา',
+        )
+        end = None
+        for prefix in folded_prefixes:
+            found = compact.find(prefix)
+            if found >= 0:
+                end = positions[found + len(prefix) - 1] + 1
+                break
+        if end is None:
+            return None
+        body = text[end:].strip()
     # In phrases such as "เตือนฉันว่าวันนี้ตอนสามทุ่มครึ่งว่าสถานะ...",
     # the date/time appears between two clauses. Use the clause after the
     # second "ว่า" as the reminder title.
@@ -274,8 +318,11 @@ def parse_request(text, now=None):
         return None
     intent = has_create_intent(raw)
     if not intent:
-        debug_log('reminder_create BUILD=%s intent=False cleaned=%s' %
-                  (BUILD, bool(raw)))
+        debug_log('reminder_create BUILD=%s intent=False probes=create:%s flex:%s use:%s folded:%s' %
+                  (BUILD, bool(_CREATE.search(raw)), bool(_CREATE_FLEX.search(raw)),
+                   bool(_USE_MESSAGE.search(raw)),
+                   any(trigger in _intent_key(raw) for trigger in (
+                       'ชวยเตอนฉนวา', 'ชวยเตอนผมวา', 'เตอนฉนวา', 'เตอนผมวา'))))
         return None
 
     title = _title_from(raw)
