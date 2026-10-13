@@ -1,6 +1,6 @@
 """Recognize clear reminder-creation requests before AI can classify them as searches."""
 # ===== BUILD MARKER =====
-BUILD = "v26"
+BUILD = "v27"
 print(">>> reminder_create BUILD=%s file=%s" % (BUILD, __file__))
 
 import datetime
@@ -35,6 +35,21 @@ _NUMBER_WORDS = {
     'ห้า': 5, 'หก': 6, 'เจ็ด': 7, 'แปด': 8, 'เก้า': 9, 'สิบ': 10,
 }
 
+_TIME_HINT = re.compile(
+    r'(?:วันนี้|พรุ่งนี้|มะรืน(?:นี้)?|คืนนี้|เช้านี้|เย็นนี้|'
+    r'วัน(?:จันทร์|อังคาร|พุธ|พฤหัส(?:บดี)?|ศุกร์|เสาร์|อาทิตย์)|'
+    r'\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[:.]\d{2}|'
+    r'เที่ยงคืน|เที่ยง|โมง|ทุ่ม|ตี\s*[\dก-๙]+)')
+
+
+def has_create_intent(text):
+    """True for an explicit create-reminder phrase, even if its details are incomplete."""
+    raw = str(text or '')
+    if any(phrase in raw for phrase in _NEGATED):
+        return False
+    return bool(_CREATE.search(raw) or _CREATE_FLEX.search(raw)
+                or _USE_MESSAGE.search(raw))
+
 
 def _number_value(value):
     return int(value) if value.isdigit() else _NUMBER_WORDS.get(value)
@@ -44,8 +59,20 @@ def _title_from(text):
     match = _USE_MESSAGE.search(text) or _CREATE.search(text) or _CREATE_FLEX.search(text)
     if not match:
         return None
-    title = _TIME_TAIL.sub('', match.group(1)).strip()
-    title = re.sub(r'^(?:ให้|ว่า)\s*', '', title).strip(' ,.!?ฯ')
+    body = match.group(1).strip()
+    # In phrases such as "เตือนฉันว่าวันนี้ตอนสามทุ่มครึ่งว่าสถานะ...",
+    # the date/time appears between two clauses. Use the clause after the
+    # second "ว่า" as the reminder title.
+    clauses = body.split('ว่า')
+    if len(clauses) > 1:
+        for index in range(1, len(clauses)):
+            prefix = 'ว่า'.join(clauses[:index])
+            suffix = 'ว่า'.join(clauses[index:]).strip()
+            if _TIME_HINT.search(prefix) and suffix:
+                body = suffix
+                break
+    title = _TIME_TAIL.sub('', body).strip()
+    title = re.sub(r'^(?:(?:ให้)?(?:เต็ม)?ว่า|ให้)\s*', '', title).strip(' ,.!?ฯ')
     # A relative duration is part of the due time, not part of the reminder title.
     title = _RELATIVE_NOW.split(title, maxsplit=1)[0].strip(' ,.!?ฯ')
     duration = wake_duration._duration_minutes(
@@ -93,12 +120,12 @@ def _parse_clock(normalized):
             return None, None, None
         return hour, 0, None
 
-    match = re.search(r'(\d{1,2}|%s)\s*ทุ่ม' % word_pattern, normalized)
+    match = re.search(r'(\d{1,2}|%s)\s*ทุ่ม\s*(ครึ่ง)?' % word_pattern, normalized)
     if match:
         n = _number_value(match.group(1))
         if n is None or not 1 <= n <= 5:
             return None, None, None
-        return 18 + n, 0, None
+        return 18 + n, (30 if match.group(2) else 0), None
 
     match = re.search(
         r'(?:บ่าย\s*)?(\d{1,2}|%s)\s*โมง\s*(เช้า|สาย|บ่าย|เย็น|ค่ำ|กลางคืน)?'
@@ -227,7 +254,7 @@ def parse_request(text, now=None):
         return None
     if any(phrase in raw for phrase in _NEGATED):
         return None
-    if not (_CREATE.search(raw) or _CREATE_FLEX.search(raw) or _USE_MESSAGE.search(raw)):
+    if not has_create_intent(raw):
         return None
 
     title = _title_from(raw)

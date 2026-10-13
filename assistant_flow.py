@@ -16,6 +16,7 @@ import ui
 import re
 import time
 import ai_client
+import reminder_create
 import compound_split
 import date_guard
 import reminders_tool
@@ -118,18 +119,13 @@ def _is_period_followup(text):
 
 def local_list_action(text, turns=None):
     """แปลงคำขอดูรายการรายวัน/รายเดือนด้วยโค้ด เพื่อกัน AI แปลงเดือนหรือปีผิด"""
+    # Keep explicit create requests out of the local list path, even when the
+    # reminder parser still needs to ask for a missing or ambiguous detail.
+    if reminder_create.has_create_intent(text):
+        return None
     # [v12] คำถามค้นตามหัวข้อ (เช่น "ได้ปันผลมากี่รายการ") ให้ reminder_search จัดการ
     # กันคำว่า "รายการ" ใน "กี่รายการ" ทำให้กลายเป็นดูรายการรายวัน
     if reminder_search.wants_search(text):
-        return None
-    # [v21] คำสั่งสร้างเตือนที่ชัดเจน (มี "เตือนว่า" / "ช่วยเตือน") ห้ามตีความเป็นขอดูรายการ
-    # แม้จะมีคำว่า "เตือน" และวันเวลาอยู่ในประโยค
-    create_intent = (
-        re.search(r'(?:ช่วย\s*)?(?:ตั้ง\s*)?(?:เตือน|แจ้งเตือน)(?:ฉัน|ผม|เรา)?\s*'
-                  r'(?:ว่า|ให้(?:จำ)?(?:ว่า)?|เรื่อง)', text)
-        or re.search(r'ใช้\s*(?:ข้อความ(?:แจ้งเตือน|เตือน)?|เนื้อหา)\s*ว่า', text)
-    )
-    if create_intent:
         return None
     # [v12] "ก่อนหน้าวันนี้", "จนถึงวันนี้" ไม่ได้แปลว่า "วันนี้"
     for phrase in ('ก่อนหน้าวันนี้', 'ก่อนวันนี้', 'จนถึงวันนี้', 'ถึงวันนี้', 'ตั้งแต่วันนี้'):

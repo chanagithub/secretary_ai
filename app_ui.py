@@ -5,8 +5,8 @@
 รันไฟล์นี้ใน Pythonista (ต้องมี config.py, ai_client.py, chat_views.py, overlays.py,
 assistant_flow.py, tools.py, date_guard.py, reminders_tool.py อยู่โฟลเดอร์เดียวกัน)
 """
-# ===== BUILD MARKER: ถ้าไม่เห็น v26 แสดงว่ายังรันไฟล์เก่า =====
-BUILD = 'v26'
+# ===== BUILD MARKER: ถ้าไม่เห็น v27 แสดงว่ายังรันไฟล์เก่า =====
+BUILD = 'v27'
 print('>>> app_ui BUILD=%s file=%s' % (BUILD, __file__))
 
 import threading
