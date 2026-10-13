@@ -79,6 +79,9 @@ def ask_ai(sent_text, on_chunk, token, model, history):
         sent_text, on_chunk, token, ft.schemas(ctx['lists']),
         model=model, history=msgs, system_prompt=_system_prompt(ctx))
     if not calls:
+        if not (text or '').strip():
+            debug_log('finance: AI returned no text or tool call')
+            return '', [_note('AI ยังไม่ได้ส่งคำสั่งกลับมา กรุณาส่งคำสั่งเดิมอีกครั้ง')]
         if text and ('record_' in text or 'default_api' in text) and '(' in text:
             debug_log('finance: pseudo tool-call text')
             return '', [_note(_PSEUDO_NOTE)]
