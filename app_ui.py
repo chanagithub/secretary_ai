@@ -30,7 +30,7 @@ HINT_TEXT = 'พิมพ์ หรือกดไมค์บนคีย์บ
 class MainView(ui.View):
     def __init__(self):
         super().__init__()
-        debug_log('ui: build=v24 app=%s reminder_create=%s wake_duration=%s' %
+        debug_log('ui: build=v25 app=%s reminder_create=%s wake_duration=%s' %
                   (__file__, getattr(reminder_create, '__file__', '?'),
                    getattr(wake_duration, '__file__', '?')))
         self.name = 'AI เลขาส่วนตัว'

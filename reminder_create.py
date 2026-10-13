@@ -2,13 +2,16 @@
 import datetime
 import re
 
-import assistant_flow
 import wake_duration
 
 
 _CREATE = re.compile(
     r'(?:ช่วย\s*)?(?:ตั้ง\s*)?(?:เตือน|แจ้งเตือน)(?:ฉัน|ผม|เรา)?\s*'
     r'(?:ว่า|ให้(?:จำ)?(?:ว่า)?|เรื่อง)\s*(.+)$')
+# รูปแบบที่คำว่า "เตือน" อยู่ท้ายหรือกลางประโยค เช่น "พรุ่งนี้เที่ยงช่วยเตือนฉันว่าไปกินข้าว"
+_CREATE_FLEX = re.compile(
+    r'(?:ช่วย\s*)?(?:ตั้ง\s*)?(?:เตือน|แจ้งเตือน)(?:ฉัน|ผม|เรา)?\s*'
+    r'(?:ว่า|ให้(?:จำ)?(?:ว่า)?|เรื่อง)\s*(.+)')
 _USE_MESSAGE = re.compile(
     r'(?:ช่วย\s*)?ใช้\s*(?:ข้อความ(?:แจ้งเตือน|เตือน)?|เนื้อหา)\s*ว่า\s*(.+)$')
 _NEGATED = ('ไม่ต้องเตือน', 'ไม่ต้องช่วยเตือน', 'ไม่ต้องแจ้งเตือน', 'ยกเลิกเตือน')
@@ -23,9 +26,18 @@ _TIME_TAIL = re.compile(
     r'\d{1,2}\s*โมง(?:\s*(?:เช้า|สาย|บ่าย|เย็น|ค่ำ|กลางคืน))?|'
     r'\d{1,2}\s*ทุ่ม|ตี\s*\d{1,2})(?:ตรง)?).*$')
 
+_NUMBER_WORDS = {
+    'หนึ่ง': 1, 'เอ็ด': 1, 'สอง': 2, 'สาม': 3, 'สี่': 4,
+    'ห้า': 5, 'หก': 6, 'เจ็ด': 7, 'แปด': 8, 'เก้า': 9, 'สิบ': 10,
+}
+
+
+def _number_value(value):
+    return int(value) if value.isdigit() else _NUMBER_WORDS.get(value)
+
 
 def _title_from(text):
-    match = _USE_MESSAGE.search(text) or _CREATE.search(text)
+    match = _USE_MESSAGE.search(text) or _CREATE.search(text) or _CREATE_FLEX.search(text)
     if not match:
         return None
     title = _TIME_TAIL.sub('', match.group(1)).strip()
@@ -51,27 +63,187 @@ def _relative_due(text, now=None):
         second=0, microsecond=0)
 
 
+def _parse_clock(normalized):
+    """คืน (hour, minute, ambiguous_hour) หรือ (None, None, None) ถ้าไม่พบเวลา."""
+    hour = minute = None
+    ambiguous_hour = None
+
+    match = re.search(r'(?<!\d)(\d{1,2})\s*[:.]\s*(\d{2})(?!\d)', normalized)
+    if match:
+        hour, minute = int(match.group(1)), int(match.group(2))
+        if hour > 23 or minute > 59:
+            return None, None, None
+        return hour, minute, None
+
+    if 'เที่ยงคืน' in normalized:
+        return 0, 0, None
+    if 'เที่ยง' in normalized:
+        return 12, 0, None
+
+    word_pattern = '|'.join(sorted(_NUMBER_WORDS, key=len, reverse=True))
+
+    match = re.search(r'ตี\s*(\d{1,2}|%s)' % word_pattern, normalized)
+    if match:
+        hour = _number_value(match.group(1))
+        if hour is None or not 1 <= hour <= 6:
+            return None, None, None
+        return hour, 0, None
+
+    match = re.search(r'(\d{1,2}|%s)\s*ทุ่ม' % word_pattern, normalized)
+    if match:
+        n = _number_value(match.group(1))
+        if n is None or not 1 <= n <= 5:
+            return None, None, None
+        return 18 + n, 0, None
+
+    match = re.search(
+        r'(?:บ่าย\s*)?(\d{1,2}|%s)\s*โมง\s*(เช้า|สาย|บ่าย|เย็น|ค่ำ|กลางคืน)?'
+        % word_pattern, normalized)
+    if match:
+        n = _number_value(match.group(1))
+        part = match.group(2)
+        if part in ('เช้า', 'สาย'):
+            hour = n
+        elif part in ('เย็น', 'ค่ำ', 'กลางคืน'):
+            hour = n + 12 if n is not None and n < 12 else n
+        elif match.group(0).startswith('บ่าย') or 'บ่าย' in normalized[:match.start()]:
+            hour = n + 12 if n is not None and n < 12 else n
+        elif n == 12:
+            hour = 12
+        elif n is not None and 13 <= n <= 23:
+            hour = n
+        elif n is not None and 1 <= n <= 11:
+            hour = n
+            ambiguous_hour = n
+        else:
+            return None, None, None
+        if hour is None or not 0 <= hour <= 23:
+            return None, None, None
+        return hour, 0, ambiguous_hour
+
+    match = re.search(r'(%s)\s*(เช้า|สาย|เย็น|ค่ำ|กลางคืน)' % word_pattern, normalized)
+    if match:
+        n = _number_value(match.group(1))
+        part = match.group(2)
+        if part in ('เช้า', 'สาย'):
+            hour = n
+        else:
+            hour = n + 12 if n is not None and n < 12 else n
+        if hour is None:
+            return None, None, None
+        return hour, 0, None
+
+    return None, None, None
+
+
+def _parse_day(normalized, hour, minute, now=None):
+    """คืน date object จากคำบอกวันในข้อความ."""
+    current = now or datetime.datetime.now()
+    today = current.date()
+
+    if 'มะรืน' in normalized:
+        return today + datetime.timedelta(days=2)
+    if 'พรุ่งนี้' in normalized:
+        return today + datetime.timedelta(days=1)
+    if any(word in normalized for word in ('วันนี้', 'คืนนี้', 'เช้านี้', 'เย็นนี้')):
+        return today
+
+    date_match = re.search(r'\b(20\d{2})-(\d{1,2})-(\d{1,2})\b', normalized)
+    if date_match:
+        try:
+            return datetime.date(*(int(part) for part in date_match.groups()))
+        except ValueError:
+            return None
+
+    weekday_names = {
+        'จันทร์': 0, 'อังคาร': 1, 'พุธ': 2, 'พฤหัส': 3,
+        'ศุกร์': 4, 'เสาร์': 5, 'อาทิตย์': 6,
+    }
+    target = next((wd for name, wd in weekday_names.items() if name in normalized), None)
+    if target is not None:
+        offset = (target - today.weekday()) % 7
+        if offset == 0 and hour is not None:
+            proposed = datetime.datetime.combine(today, datetime.time(hour, minute or 0))
+            if proposed <= current:
+                offset = 7
+        return today + datetime.timedelta(days=offset)
+
+    # ไม่บอกวัน: ใช้วันนี้ถ้าเวลายังไม่ผ่าน ไม่งั้นพรุ่งนี้
+    if hour is not None:
+        proposed = datetime.datetime.combine(today, datetime.time(hour, minute or 0))
+        if proposed > current:
+            return today
+        return today + datetime.timedelta(days=1)
+    return None
+
+
+def _absolute_due(text, now=None):
+    """แปลงวัน+เวลาแบบสัมบูรณ์ (พรุ่งนี้เที่ยง, 14:30 ฯลฯ) เป็น datetime."""
+    normalized = str(text or '').translate(str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789'))
+    hour, minute, ambiguous = _parse_clock(normalized)
+    if hour is None:
+        return None
+
+    current = now or datetime.datetime.now()
+    today = current.date()
+
+    if ambiguous is not None:
+        has_day = (
+            any(w in normalized for w in (
+                'มะรืน', 'พรุ่งนี้', 'วันนี้', 'คืนนี้', 'เช้านี้', 'เย็นนี้'))
+            or re.search(r'\b20\d{2}-\d{1,2}-\d{1,2}\b', normalized)
+            or any(w in normalized for w in (
+                'จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์', 'อาทิตย์')))
+        if has_day:
+            # มีวันแล้วแต่ไม่บอกเช้า/บ่าย → ยังกำกวม ปล่อยให้ AI/guided flow ถาม
+            return None
+        for h in (ambiguous, ambiguous + 12):
+            if datetime.datetime.combine(today, datetime.time(h, 0)) > current:
+                hour = h
+                break
+        else:
+            hour = ambiguous
+
+    day = _parse_day(normalized, hour, minute, current)
+    if day is None:
+        return None
+    return datetime.datetime.combine(day, datetime.time(hour, minute or 0))
+
+
 def parse_request(text, now=None):
-    """Return a create_reminder tool call for an explicit reminder request."""
+    """Return a create_reminder tool call for an explicit reminder request.
+
+    รองรับประโยคเช่น:
+      - วันพรุ่งนี้เวลาเที่ยงช่วยเตือนฉันว่าไปกินข้าว
+      - ใช้ข้อความเตือนว่า กินข้าวได้แล้ว พรุ่งนี้เวลาเที่ยง
+      - เตือนฉันว่าประชุม วันจันทร์ 10:00
+    """
     raw = str(text or '').strip()
+    if not raw:
+        return None
     if any(phrase in raw for phrase in _NEGATED):
         return None
-    if not (_CREATE.search(raw) or _USE_MESSAGE.search(raw)):
+    if not (_CREATE.search(raw) or _CREATE_FLEX.search(raw) or _USE_MESSAGE.search(raw)):
         return None
+
     title = _title_from(raw)
     if not title:
         return None
 
     due = _relative_due(raw, now)
     if due is None:
-        # Reuse the app's date/time parser for absolute dates and clock phrases.
-        parsed = assistant_flow._local_wake_alarm_action('ตั้งปลุก ' + raw)
-        if not parsed or parsed.get('kind') != 'tool':
-            return None
-        due_text = parsed['call']['arguments']['due_date']
-    else:
-        due_text = due.strftime('%Y-%m-%d %H:%M')
+        due = _absolute_due(raw, now)
+    if due is None:
+        # มี intent สร้างชัดเจนแต่ยังไม่มีวัน/เวลาครบ → ไม่ส่งไป list/search
+        # คืน None เพื่อให้ flow ถัดไป (guided / AI) ถามช่องที่ขาด
+        return None
 
-    return {'id': None, 'name': 'create_reminder',
-            'arguments': {'title': title, 'due_date': due_text,
-                          'urgent_alarm': False}}
+    return {
+        'id': None,
+        'name': 'create_reminder',
+        'arguments': {
+            'title': title,
+            'due_date': due.strftime('%Y-%m-%d %H:%M'),
+            'urgent_alarm': False,
+        },
+    }
