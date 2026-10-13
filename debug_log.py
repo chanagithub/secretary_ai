@@ -6,9 +6,26 @@
 import os
 import time
 import traceback
+import sys
+
+BUILD = 'diagnostic-1'
 
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug.log')
 _MAX_BYTES = 100000
+
+
+def _console(message):
+    try:
+        sys.stderr.write('debug_log %s\n' % message)
+        sys.stderr.flush()
+    except Exception:
+        try:
+            print('debug_log %s' % message)
+        except Exception:
+            pass
+
+
+_console('BUILD=%s loaded module=%s path=%s' % (BUILD, __file__, _PATH))
 
 
 def log(msg):
@@ -19,9 +36,13 @@ def log(msg):
             f.write('%s %s\n' % (time.strftime('%H:%M:%S'), msg))
             f.flush()
             os.fsync(f.fileno())
-    except Exception:
-        pass  # การบันทึก log ต้องไม่ทำให้แอปพัง
+    except Exception as exc:
+        # Keep logging failures visible in Pythonista's console during diagnosis.
+        _console('WRITE FAILED path=%s error=%r' % (_PATH, exc))
 
 
 def log_exc(where):
     log('EXC %s: %s' % (where, traceback.format_exc()))
+
+
+log('debug_log BUILD=%s ready module=%s path=%s' % (BUILD, __file__, _PATH))
