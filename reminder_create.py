@@ -1,10 +1,11 @@
 """Recognize clear reminder-creation requests before AI can classify them as searches."""
 # ===== BUILD MARKER =====
-BUILD = "v28"
+BUILD = "v29"
 print(">>> reminder_create BUILD=%s file=%s" % (BUILD, __file__))
 
 import datetime
 import re
+import unicodedata
 
 import wake_duration
 from debug_log import log as debug_log
@@ -43,13 +44,27 @@ _TIME_HINT = re.compile(
     r'เที่ยงคืน|เที่ยง|โมง|ทุ่ม|ตี\s*[\dก-๙]+)')
 
 
+def _clean_text(text):
+    """Normalize Thai input and discard invisible formatting characters."""
+    value = unicodedata.normalize('NFKC', str(text or ''))
+    value = ''.join(ch for ch in value
+                    if unicodedata.category(ch) != 'Cf')
+    return re.sub(r'\s+', ' ', value).strip()
+
+
 def has_create_intent(text):
     """True for an explicit create-reminder phrase, even if its details are incomplete."""
-    raw = str(text or '')
-    if any(phrase in raw for phrase in _NEGATED):
+    raw = _clean_text(text)
+    compact = re.sub(r'\s+', '', raw)
+    if any(phrase in raw or phrase.replace(' ', '') in compact for phrase in _NEGATED):
         return False
     return bool(_CREATE.search(raw) or _CREATE_FLEX.search(raw)
-                or _USE_MESSAGE.search(raw))
+                or _USE_MESSAGE.search(raw)
+                or any(phrase in compact for phrase in (
+                    'ช่วยเตือนฉันว่า', 'ช่วยเตือนผมว่า', 'ช่วยเตือนเราว่า',
+                    'เตือนฉันว่า', 'เตือนผมว่า', 'เตือนเราว่า',
+                    'ช่วยแจ้งเตือนฉันว่า', 'ช่วยแจ้งเตือนผมว่า',
+                    'แจ้งเตือนฉันว่า', 'แจ้งเตือนผมว่า')))
 
 
 def _number_value(value):
@@ -250,7 +265,7 @@ def parse_request(text, now=None):
       - ใช้ข้อความเตือนว่า กินข้าวได้แล้ว พรุ่งนี้เวลาเที่ยง
       - เตือนฉันว่าประชุม วันจันทร์ 10:00
     """
-    raw = str(text or '').strip()
+    raw = _clean_text(text)
     if not raw:
         debug_log('reminder_create BUILD=%s empty_input' % BUILD)
         return None
@@ -259,7 +274,8 @@ def parse_request(text, now=None):
         return None
     intent = has_create_intent(raw)
     if not intent:
-        debug_log('reminder_create BUILD=%s intent=False' % BUILD)
+        debug_log('reminder_create BUILD=%s intent=False cleaned=%s' %
+                  (BUILD, bool(raw)))
         return None
 
     title = _title_from(raw)

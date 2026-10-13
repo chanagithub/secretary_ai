@@ -26,7 +26,7 @@ import tools
 from overlays import ConfirmOverlay, ChoiceOverlay, NoTimeConfirmOverlay
 from debug_log import log as debug_log
 
-BUILD = 'v28'
+BUILD = 'v29'
 debug_log('assistant_flow BUILD=%s loaded module=%s reminder_create BUILD=%s' %
           (BUILD, __file__, getattr(reminder_create, 'BUILD', '?')))
 
