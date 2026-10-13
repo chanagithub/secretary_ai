@@ -13,6 +13,8 @@ import console
 import config
 import ai_client
 import assistant_flow
+import finance_flow
+import modes
 import search_terms
 from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
 from overlays import ChoiceOverlay
@@ -38,6 +40,7 @@ class MainView(ui.View):
         self._action_base_text = ''
         self._action_runner = None
         self._keep_context = False  # True = รอบนี้ AI ถามเวลา ต้องจำไว้ให้รอบถัดไป
+        self._active_flow = assistant_flow
         self._reminder_snapshot = []  # หมายเลขรายการล่าสุดที่ผู้ใช้เห็น ใช้กับคำสั่งต่อเนื่อง
         self._scroll_scheduled = False
 
@@ -391,6 +394,10 @@ class MainView(ui.View):
 
     def begin_request_unchecked(self, text):
         """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
+        self._active_flow = finance_flow if self.mode_ctl.mode == modes.ACCOUNTS else assistant_flow
+        if self._active_flow is finance_flow:
+            self.start_request(text, text)
+            return
         local_list = assistant_flow.local_list_action(text, self._turns)
         if local_list is not None:
             self._live = {'time': config.now_text(), 'model': config.get_current_model(),
@@ -437,7 +444,7 @@ class MainView(ui.View):
             error = None
             calls = []
             try:
-                _, calls = assistant_flow.ask_ai(
+                _, calls = self._active_flow.ask_ai(
                     sent_text, on_chunk, token, model, history)
             except ai_client.AIError as e:
                 error = str(e)
@@ -502,7 +509,7 @@ class MainView(ui.View):
             return
         # เมื่อมี tool call ให้แอปเป็นผู้แสดงผลภาษาไทยจากผลจริงของเครื่องมือ
         # ไม่แสดงข้อความอิสระที่โมเดลอาจส่งมาปน (เช่นคำอธิบายภาษาอังกฤษ)
-        self._run_actions('', assistant_flow.prepare_actions(calls, self))
+        self._run_actions('', self._active_flow.prepare_actions(calls, self))
 
     def _run_actions(self, ai_text, actions):
         """เริ่มลำดับยืนยัน/บันทึก โดยใช้เมธอดของ MainView เป็น callback"""
@@ -515,7 +522,7 @@ class MainView(ui.View):
     def _start_action_flow(self):
         actions = self._pending_actions or []
         self._pending_actions = None
-        assistant_flow.run_actions(self, actions, self._on_actions_done)
+        self._active_flow.run_actions(self, actions, self._on_actions_done)
 
     def _on_actions_done(self, lines, redo, saved):
         debug_log('ui: on_actions_done start')

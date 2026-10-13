@@ -15,7 +15,7 @@ KEYS = (REMINDERS, ACCOUNTS, ASSETS)
 LABELS = {REMINDERS: 'เตือนความจำ',
           ACCOUNTS: 'รายรับรายจ่าย',
           ASSETS: 'การลงทุน'}
-ENABLED = {REMINDERS}
+ENABLED = {REMINDERS, ACCOUNTS}
 
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mode.json')
 
