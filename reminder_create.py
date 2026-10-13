@@ -1,4 +1,8 @@
 """Recognize clear reminder-creation requests before AI can classify them as searches."""
+# ===== BUILD MARKER =====
+BUILD = "v26"
+print(">>> reminder_create BUILD=%s file=%s" % (BUILD, __file__))
+
 import datetime
 import re
 
