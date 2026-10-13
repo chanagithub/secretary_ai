@@ -13,6 +13,8 @@ import console
 import config
 import ai_client
 import assistant_flow
+import reminder_create
+import wake_duration
 import finance_flow
 import modes
 import search_terms
@@ -399,6 +401,20 @@ class MainView(ui.View):
             if finance_flow.ask_date_first(self, text):
                 return
             self.start_request(text, text)
+            return
+        create_call = reminder_create.parse_request(text)
+        if create_call is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            actions = assistant_flow.prepare_actions([create_call], self)
+            self._run_actions('', actions)
+            return
+        wake_call = wake_duration.parse_relative_wake(text)
+        if wake_call is not None:
+            self._live = {'time': config.now_text(), 'model': config.get_current_model(),
+                          'user': text, 'ai': '', 'status': 'live'}
+            actions = assistant_flow.prepare_actions([wake_call], self)
+            self._run_actions('', actions)
             return
         local_list = assistant_flow.local_list_action(text, self._turns)
         if local_list is not None:
