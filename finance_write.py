@@ -43,21 +43,27 @@ def _is_int(value):
 
 def _prepare(rec):
     """ตรวจและจัดรูปค่าก่อนเขียน คืน dict ใหม่ หรือ raise _Refused"""
+    debug_log('finance_write: prepare start')
     if not isinstance(rec, dict):
         raise _Refused('ข้อมูลรายการไม่ถูกต้อง')
+    debug_log('finance_write: prepare dict checked')
     kind = rec.get('kind')
     if kind not in (INCOME, EXPENSE):
         raise _Refused('ชนิดรายการไม่ถูกต้อง')
+    debug_log('finance_write: prepare kind checked')
     date_str = str(rec.get('date') or '')
+    debug_log('finance_write: prepare date text type=%s' % type(rec.get('date')).__name__)
     try:
         day = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
         raise _Refused('วันที่ไม่ถูกต้อง (%s)' % date_str)
+    debug_log('finance_write: prepare date parsed')
     if day.isoformat() != date_str:  # กัน '2026-1-5' ให้เก็บเป็นรูปแบบเดียวกับแอปเดิมเสมอ
         raise _Refused('รูปแบบวันที่ต้องเป็น YYYY-MM-DD (%s)' % date_str)
     detail = ' '.join(str(rec.get('detail') or '').split())
     if not detail:
         raise _Refused('ไม่มีชื่อรายการ')
+    debug_log('finance_write: prepare detail checked')
     raw_amount = rec.get('amount')
     if isinstance(raw_amount, bool):
         raise _Refused('จำนวนเงินไม่ถูกต้อง')
@@ -65,14 +71,17 @@ def _prepare(rec):
         amount = float(raw_amount)
     except (TypeError, ValueError):
         raise _Refused('จำนวนเงินไม่ถูกต้อง')
+    debug_log('finance_write: prepare amount parsed')
     if not math.isfinite(amount) or amount <= 0 or amount > MAX_AMOUNT:
         raise _Refused('จำนวนเงินไม่ถูกต้องหรือผิดปกติ (%s)' % raw_amount)
     amount = round(amount, 2)
     if not _is_int(rec.get('category_id')):
         raise _Refused('ยังไม่ได้เลือกหมวด')
+    debug_log('finance_write: prepare category checked')
     payment_id = rec.get('payment_id')
     if kind == EXPENSE and not _is_int(payment_id):
         raise _Refused('ยังไม่ได้เลือกประเภทการชำระ')
+    debug_log('finance_write: prepare payment checked')
     return {'kind': kind, 'date': date_str, 'year': day.year, 'month': day.month,
             'detail': detail, 'category_id': rec['category_id'],
             'payment_id': payment_id if kind == EXPENSE else None,
