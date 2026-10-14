@@ -21,6 +21,7 @@ import finance_db as fdb
 import finance_tools as ft
 import finance_write as fw
 import finance_files
+import finance_summary
 from overlays import ChoiceOverlay
 from finance_overlays import FinanceConfirmOverlay, ListPickOverlay, TextInputOverlay
 from debug_log import log as debug_log
@@ -95,6 +96,10 @@ def ask_date_first(host, text):
     """ถามวันที่ในแอปก่อนเรียก AI สำหรับคำสั่งรับ/จ่ายเงินที่ยังไม่มีวันที่."""
     if finance_files.is_switch_request(text):  # "เปลี่ยนไฟล์" -> ขึ้นรายการไฟล์ ไม่เรียก AI
         finance_files.FileSwitcher(host, text).show()
+        return True
+    summary_req = finance_summary.parse_request(text)  # "สรุปเดือนนี้" / "สรุปรายปี" -> รายงานของ ChanaFinance
+    if summary_req is not None:
+        finance_summary.Summarizer(host, text, summary_req).show()
         return True
     if not _looks_like_undated_transaction(text):
         return False
