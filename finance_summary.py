@@ -14,8 +14,10 @@ callback เป็น bound method + ui.delay(เมธอด, 0.3) ตามบ
 """
 import datetime
 import importlib.util
+import inspect
 import os
 import re
+import sqlite3
 
 import ui
 import config
@@ -183,15 +185,41 @@ class Summarizer:
             message = 'แสดงสรุปรายเดือน %s %d แล้ว (ไฟล์ %s)' % (_MONTHS[m], y, name)
         else:
             mod = _load(self.folder, 'yearly_summary')
-            data = mod._fetch_data(path)
+            # ChanaFinance has had two yearly-summary APIs:
+            # the current all-file version takes only db_path, while an older
+            # version takes db_path and year. Support both without editing it.
+            fetch_params = inspect.signature(mod._fetch_data).parameters
+            if len(fetch_params) >= 2:
+                year = self._latest_data_year(path)
+                if year is None:
+                    self.finish('ยังไม่มีข้อมูลในไฟล์ %s' % name)
+                    return
+                data = mod._fetch_data(path, year)
+                html = mod._build_html(data, year)
+                message = 'แสดงสรุปรายปี %d (ปีล่าสุดในไฟล์ %s) แล้ว' % (year, name)
+            else:
+                data = mod._fetch_data(path)
+                html = mod._build_html(data)
+                message = 'แสดงสรุปรายปี (ข้อมูลทั้งไฟล์) แล้ว (ไฟล์ %s)' % name
             if not data:
                 self.finish('ยังไม่มีข้อมูลในไฟล์ %s' % name)
                 return
-            html = mod._build_html(data)
             view = mod._ResultView(html)
-            message = 'แสดงสรุปรายปี (ข้อมูลทั้งไฟล์) แล้ว (ไฟล์ %s)' % name
         view.present('fullscreen', animated=True)
         self.finish(message)
+
+    def _latest_data_year(self, path):
+        """เลือกรอบปีล่าสุดสำหรับ yearly_summary รุ่นที่รับ year แยกต่างหาก."""
+        conn = sqlite3.connect(path)
+        try:
+            years = []
+            for table in ('income', 'expense'):
+                row = conn.execute('SELECT MAX(year) FROM ' + table).fetchone()
+                if row and row[0] is not None:
+                    years.append(int(row[0]))
+            return max(years) if years else None
+        finally:
+            conn.close()
 
     def finish(self, message):
         if self.done:
