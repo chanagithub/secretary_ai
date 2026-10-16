@@ -446,7 +446,7 @@ def _local_wake_alarm_action(text):
 
     due = datetime.datetime.combine(day, datetime.time(hour, minute))
     title_match = re.search(r'(?:ตั้งรายการ|ตั้งชื่อ|ชื่อรายการ|ข้อความ(?:ปลุก|เตือน)?)\s*(?:ว่า|เป็น)\s*(.+)$', text)
-    title = title_match.group(1).strip(' \t\r\n,，.!?ฯ') if title_match else 'ปลุกผม'
+    title = title_match.group(1).strip(' \t\r\n,，.!?ฯ') if title_match else 'AI ช่วยปลุกครับ'
     args = {'title': title, 'due_date': due.strftime('%Y-%m-%d %H:%M'),
             'urgent_alarm': True}
     return {'kind': 'tool', 'call': {'id': None, 'name': 'create_reminder',
