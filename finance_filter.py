@@ -32,6 +32,8 @@ _INTENT = ('เท่าไหร่', 'เท่าไร', 'รายละเ
 _YEAR_WORDS = ('รายปี', 'ทั้งปี', 'ประจำปี', 'ทั้งไฟล์')
 _DIVIDEND_GROUP = ('เงินปันผลจากหุ้น', 'เงินปันผลจากกองทุน', 'เงินคืนทุนจากหุ้น')
 _DIVIDEND_LABEL = 'เงินปันผล + เงินคืนทุน'
+_STOCK_PROCEEDS_GROUP = ('กำไรจากการขายหุ้น', 'เงินปันผลจากหุ้น', 'เงินคืนทุนจากหุ้น')
+_STOCK_PROCEEDS_LABEL = 'กำไรขายหุ้น + ปันผลหุ้น + เงินคืนทุนหุ้น'
 _LISTS_KEY = {INCOME: 'category_income', EXPENSE: 'category_expense'}
 
 
@@ -118,6 +120,16 @@ def _candidates(name):
 
 def _match_kind(v, cats):
     """cats = [(id, name)] -> (label, [(id, name)]) หรือ None"""
+    # คำว่า "ได้จากหุ้น" หมายถึงรายรับจากหุ้นทั้งสามประเภท
+    if any(phrase in v for phrase in ('ได้จากหุ้น', 'ได้เงินจากหุ้น', 'รายได้จากหุ้น')):
+        group = [(i, n) for i, n in cats if _norm(n) in _STOCK_PROCEEDS_GROUP]
+        if group:
+            return _STOCK_PROCEEDS_LABEL, group
+    # พูดว่าขายหุ้นโดยตรง ให้เลือกเฉพาะกำไรจากการขายหุ้น
+    if 'ขายหุ้น' in v:
+        group = [(i, n) for i, n in cats if 'หุ้น' in _norm(n) and 'กำไร' in _norm(n) and 'ขาย' in _norm(n)]
+        if group:
+            return 'กำไรจากการขายหุ้น', group
     if 'ปันผล' in v and not ('ปันผลจากหุ้น' in v or 'ปันผลจากกองทุน' in v):
         group = [(i, n) for i, n in cats if _norm(n) in _DIVIDEND_GROUP]
         if group:
