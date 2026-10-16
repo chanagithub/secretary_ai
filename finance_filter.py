@@ -52,7 +52,8 @@ def looks_like_filter_request(text):
         return False
     if not any(w in v for w in _INTENT):
         return False
-    rest = re.sub(r'(?<!\d)\d{1,2}/\d{4}(?!\d)', '', v)  # 9/2569
+    rest = fl.REL_DIGIT_RE.sub('', v)  # 2เดือนที่แล้ว
+    rest = re.sub(r'(?<!\d)\d{1,2}/\d{4}(?!\d)', '', rest)  # 9/2569
     rest = re.sub(r'เดือน(?:ที่)?\d{1,2}(?!\d)', '', rest)  # เดือน 9
     rest = re.sub(r'(?<![\d/])(?:1[89]\d\d|2\d{3})(?![\d/])', '', rest)  # ปี
     return not re.search(r'\d', rest)  # เหลือตัวเลขอื่น = น่าจะเป็นจำนวนเงิน/วันที่ ของคำสั่งบันทึก

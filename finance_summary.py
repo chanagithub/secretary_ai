@@ -23,6 +23,7 @@ import ui
 import config
 import finance_db as fdb
 import finance_tools as ft
+import finance_listing
 from overlays import ChoiceOverlay
 from debug_log import log as debug_log
 
@@ -55,8 +56,8 @@ def parse_request(text, today=None):
     month = year = year_rel = None
     if 'เดือนนี้' in v:
         month = today.month
-    elif any(w in v for w in _PREV_MONTH):
-        year_rel, month = _shift_month(today.year, today.month, -1)
+    elif finance_listing.relative_month(v, today) is not None:  # เดือนที่แล้ว / สองเดือนที่แล้ว / เดือนหน้า ฯลฯ
+        year_rel, month = finance_listing.relative_month(v, today)
     if month is None:
         m = re.search(r'(?<!\d)(\d{1,2})/(\d{4})(?!\d)', v)  # 9/2569
         if m:

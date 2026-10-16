@@ -45,13 +45,35 @@ def _shift_month(year, month, delta):
     return idx // 12, idx % 12 + 1
 
 
+_NUM_WORDS = {'หนึ่ง': 1, 'สอง': 2, 'สาม': 3, 'สี่': 4, 'ห้า': 5, 'หก': 6,
+              'เจ็ด': 7, 'แปด': 8, 'เก้า': 9, 'สิบ': 10}
+_REL_RE = re.compile(r'(\d{1,2}|หนึ่ง|สอง|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า|สิบ)?'
+                     r'เดือน(ที่แล้ว|ที่ผ่านมา|ก่อน|หน้า)')
+# ใช้ลบคำบอกเดือนสัมพัทธ์ก่อนเช็กตัวเลขที่เหลือ (finance_filter)
+REL_DIGIT_RE = re.compile(r'\d{1,2}(?=เดือน(?:ที่แล้ว|ที่ผ่านมา|ก่อน|หน้า))')
+
+
+def relative_month(v, today):
+    """เดือนสัมพัทธ์: เดือนที่แล้ว/เดือนก่อน/เดือนที่ผ่านมา/เดือนหน้า และมีจำนวนนำหน้าได้
+    (สองเดือนที่แล้ว, 3เดือนที่แล้ว, สามเดือนหน้า) -> (year, month) หรือ None"""
+    m = _REL_RE.search(v)
+    if not m:
+        return None
+    count = m.group(1)
+    n = 1 if not count else (int(count) if count.isdigit() else _NUM_WORDS[count])
+    if not 1 <= n <= 36:
+        return None
+    return _shift_month(today.year, today.month, n if m.group(2) == 'หน้า' else -n)
+
+
 def _parse_month_year(v, today):
     """v = ข้อความที่ตัดช่องว่างและแปลงเลขไทยแล้ว -> (month, year ค.ศ.) ไม่บอกเดือน = เดือนปัจจุบัน"""
     month = year = year_rel = None
+    rel = relative_month(v, today)
     if 'เดือนนี้' in v:
         month = today.month
-    elif any(w in v for w in _PREV_MONTH):
-        year_rel, month = _shift_month(today.year, today.month, -1)
+    elif rel is not None:
+        year_rel, month = rel
     if month is None:
         m = re.search(r'(?<!\d)(\d{1,2})/(\d{4})(?!\d)', v)  # 9/2569
         if m:
