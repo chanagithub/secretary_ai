@@ -20,6 +20,9 @@ _REMINDER_WORDS = ('เตือน', 'นัด', 'ปลุก', 'ประช
 # คำถาม/ค้นย้อนหลัง ไม่ใช่การบันทึกรายการ
 _QUESTION_WORDS = ('กี่', 'เท่าไหร่', 'เท่าไร', 'ไหม', 'หรือเปล่า', 'ที่ผ่านมา',
                    'ย้อนหลัง', 'ในอดีต', 'ก่อนหน้า', 'ทั้งหมด', 'ยอดรวม', 'รายการ')
+# คำถามเฉพาะด้านการเงินให้ตรวจเป็นโหมดรายรับรายจ่ายก่อนกฎข้ามคำถามทั่วไป
+_FINANCE_QUERY_WORDS = ('กำไร', 'ปันผล', 'เงินคืนทุน', 'รายรับ', 'รายจ่าย',
+                        'รายได้', 'ได้จากหุ้น', 'ได้เงินจากหุ้น', 'รายได้จากหุ้น')
 _ASSET_RE = re.compile(
     r'(ซื้อ|ขาย|สั่งซื้อ|สับเปลี่ยน)\s*(กองทุน|หุ้น|หลักทรัพย์|etf|ตราสาร|หน่วยลงทุน)')
 _AMOUNT_RE = re.compile(r'\d[\d,]*(?:\.\d+)?\s*(?:บาท|฿|baht)|เป็นเงิน\s*\d', re.I)
@@ -34,6 +37,11 @@ def detect_mode(text):
         return None
     if any(w in t for w in _REMINDER_WORDS):
         return REMINDERS
+    if any(w in t for w in _FINANCE_QUERY_WORDS):
+        return ACCOUNTS
+    if ('ขายหุ้น' in t and any(w in t for w in
+                               ('ได้', 'กำไร', 'เท่าไหร่', 'เท่าไร', 'เงิน'))):
+        return ACCOUNTS
     if any(w in t for w in _QUESTION_WORDS):
         return None
     if _ASSET_RE.search(t):
