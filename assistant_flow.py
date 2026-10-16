@@ -26,7 +26,7 @@ import tools
 from overlays import ConfirmOverlay, ChoiceOverlay, NoTimeConfirmOverlay
 from debug_log import log as debug_log
 
-BUILD = 'v31'
+BUILD = 'v32'
 debug_log('assistant_flow BUILD=%s loaded module=%s reminder_create BUILD=%s' %
           (BUILD, __file__, getattr(reminder_create, 'BUILD', '?')))
 
@@ -445,7 +445,9 @@ def _local_wake_alarm_action(text):
                 day = today + datetime.timedelta(days=offset)
 
     due = datetime.datetime.combine(day, datetime.time(hour, minute))
-    args = {'title': 'ปลุกผม', 'due_date': due.strftime('%Y-%m-%d %H:%M'),
+    title_match = re.search(r'(?:ตั้งรายการ|ตั้งชื่อ|ชื่อรายการ|ข้อความ(?:ปลุก|เตือน)?)\s*(?:ว่า|เป็น)\s*(.+)$', text)
+    title = title_match.group(1).strip(' \t\r\n,，.!?ฯ') if title_match else 'ปลุกผม'
+    args = {'title': title, 'due_date': due.strftime('%Y-%m-%d %H:%M'),
             'urgent_alarm': True}
     return {'kind': 'tool', 'call': {'id': None, 'name': 'create_reminder',
                                     'arguments': args}}
