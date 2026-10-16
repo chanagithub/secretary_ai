@@ -23,6 +23,7 @@ import finance_write as fw
 import finance_files
 import finance_summary
 import finance_listing
+import finance_filter
 from overlays import ChoiceOverlay
 from finance_overlays import FinanceConfirmOverlay, ListPickOverlay, TextInputOverlay
 from debug_log import log as debug_log
@@ -101,6 +102,8 @@ def ask_date_first(host, text):
     summary_req = finance_summary.parse_request(text)  # "สรุปเดือนนี้" / "สรุปรายปี" -> รายงานของ ChanaFinance
     if summary_req is not None:
         finance_summary.Summarizer(host, text, summary_req).show()
+        return True
+    if finance_filter.try_start(host, text):  # "เดือนนี้ได้รับปันผลเท่าไหร่" -> รายการเฉพาะหมวด (ไม่ตรงหมวด = ไปต่อ)
         return True
     listing_req = finance_listing.parse_request(text)  # "ขอดูรายรับเดือนนี้" -> หน้ารายการของเดือน (อ่านอย่างเดียว)
     if listing_req is not None:
