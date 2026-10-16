@@ -59,6 +59,42 @@ def looks_like_filter_request(text):
     return not re.search(r'\d', rest)  # เหลือตัวเลขอื่น = น่าจะเป็นจำนวนเงิน/วันที่ ของคำสั่งบันทึก
 
 
+# คำนำหน้าที่ตัดออกเพื่อได้คำเรียกสั้น ๆ (เช่น "ค่าใช้จ่ายส่วนตัว" -> "ส่วนตัว", "และทำสวน" -> "ทำสวน")
+_PREFIXES = ('ค่าใช้จ่าย', 'รายจ่ายของ', 'รายรับของ', 'กำไรจากการ', 'และ', 'ค่า', 'เงิน')
+# คำเรียกอื่น ๆ ของหมวด: (ส่วนของชื่อหมวด, คำที่ผู้ใช้อาจพูด) จับหมวดด้วย "ส่วนของชื่อ" จึงใช้ได้แม้เปลี่ยนชื่อหมวดเล็กน้อย
+_ALIASES = (
+    ('ค่าอุปกรณ์ช่าง', ('ช่าง', 'ทำสวน', 'สวน', 'อุปกรณ์', 'เครื่องมือ', 'ต้นไม้', 'ปุ๋ย')),
+    ('ค่าใช้จ่ายส่วนตัว', ('ส่วนตัว',)),
+    ('ค่าใช้จ่ายท่องเที่ยว', ('ท่องเที่ยว', 'เที่ยว', 'ทริป')),
+    ('ค่าน้ำค่าไฟ', ('ค่าไฟ', 'ไฟฟ้า', 'ค่าน้ำประปา', 'ประปา', 'อินเตอร์เน็ต', 'อินเทอร์เน็ต', 'ค่าเน็ต', 'เน็ต')),
+    ('ค่ายา', ('ค่ายา', 'รักษา', 'พยาบาล', 'หมอ', 'โรงพยาบาล')),
+    ('ค่าน้ำมัน', ('น้ำมัน', 'เติมน้ำมัน')),
+    ('ของใช้ในบ้าน', ('ของใช้', 'ในบ้าน')),
+    ('ทำบุญ', ('บุญ', 'บริจาค')),
+    ('อาหาร', ('อาหาร', 'ข้าว', 'ขนม', 'กาแฟ', 'ของกิน')),
+    ('อื่นๆ', ('อื่นๆ', 'อื่น')),
+    ('รายจ่ายของคลินิก', ('คลินิก',)),
+    ('รายรับของคลินิก', ('คลินิก',)),
+    ('ค่าเช่าบ้าน', ('ค่าเช่า', 'เช่าบ้าน')),
+    ('เบี้ยผู้สูงอายุ', ('ผู้สูงอายุ', 'เบี้ยยังชีพ', 'เบี้ย')),
+    ('กำไรจากการขายหุ้น', ('ขายหุ้น', 'กำไรหุ้น')),
+    ('กำไรจากการขายกองทุน', ('ขายกองทุน', 'กำไรกองทุน')),
+)
+_INCOME_CUES = ('รายรับ', 'ได้รับ', 'รับเงิน', 'เงินเข้า')
+_EXPENSE_CUES = ('จ่าย', 'เสีย', 'ซื้อ')
+
+
+def _strip_prefixes(s):
+    changed = True
+    while changed:
+        changed = False
+        for p in _PREFIXES:
+            if s.startswith(p) and len(s) > len(p):
+                s = s[len(p):]
+                changed = True
+    return s
+
+
 def _candidates(name):
     """คำที่ใช้เทียบกับประโยคของหมวดนี้ (ยาวอย่างน้อย 3 ตัวอักษร)"""
     nn = _norm(name)
@@ -68,6 +104,15 @@ def _candidates(name):
     for part in str(name or '').split():
         if len(part) >= 3:
             out.add(part)
+        short = _strip_prefixes(part)  # "และทำสวน" -> "ทำสวน", "ค่าใช้จ่ายส่วนตัว" -> "ส่วนตัว"
+        if len(short) >= 4:
+            out.add(short)
+    short = _strip_prefixes(nn)
+    if len(short) >= 4:
+        out.add(short)
+    for fragment, words in _ALIASES:
+        if fragment in nn:
+            out.update(words)
     return [c for c in out if len(c) >= 3]
 
 
@@ -103,6 +148,12 @@ def match_categories(text, lists):
         res = _match_kind(v, lists.get(_LISTS_KEY[kind]) or [])
         if res:
             results[kind] = res
+    if len(results) == 2:  # ตรงทั้งรายรับและรายจ่าย (เช่น "คลินิก") -> ดูคำบอกใบ้ ไม่มี = ไม่ชัด
+        is_income = any(w in v for w in _INCOME_CUES)
+        is_expense = any(w in v for w in _EXPENSE_CUES)
+        if is_income == is_expense:
+            return None
+        results = {INCOME if is_income else EXPENSE: results[INCOME if is_income else EXPENSE]}
     if len(results) != 1:
         return None
     kind = next(iter(results))
