@@ -6,7 +6,7 @@ payload = json.dumps({'MODE': 'new', 'TITLE': 'ทดสอบเลขา AI',
                      ensure_ascii=False)
 MARK = '__WAITING__'
 clipboard.set(MARK)
-q = urlencode({'name': 'AI TestInput',
+q = urlencode({'name': 'AI SaveToNote',
                'input': 'text',
                'text': payload,
                'x-success': 'pythonista3://',
