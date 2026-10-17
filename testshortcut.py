@@ -1,11 +1,14 @@
-import clipboard, shortcuts, time
+import json, clipboard, shortcuts, time
 from urllib.parse import urlencode, quote
 
+payload = json.dumps({'MODE': 'new', 'TITLE': 'ทดสอบเลขา AI',
+                      'BODY': '17 ต.ค. 2026\nเพลงทดสอบ 1'},
+                     ensure_ascii=False)
 MARK = '__WAITING__'
 clipboard.set(MARK)
 q = urlencode({'name': 'AI TestInput',
                'input': 'text',
-               'text': 'hello 123',
+               'text': payload,
                'x-success': 'pythonista3://',
                'x-cancel': 'pythonista3://'}, quote_via=quote)
 shortcuts.open_url('shortcuts://x-callback-url/run-shortcut?' + q)
