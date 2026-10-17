@@ -6,8 +6,8 @@ MODE = 'new'   # ลอง 'new' ก่อน แล้วค่อยเปล�
 TITLE = 'ทดสอบเลขา AI'
 BODY = '17 ต.ค. 2026\nเพลงทดสอบ 1\nเพลงทดสอบ 2'
 
-payload = json.dumps({'mode': MODE, 'title': TITLE, 'body': BODY},
-                     ensure_ascii=False)
+payload = json.dumps({'MODE': MODE, 'TITLE': TITLE, 'BODY': BODY},
+                     ensure_ascii=False
 q = urlencode({'name': SHORTCUT_NAME,
                'input': 'text',
                'text': payload,
