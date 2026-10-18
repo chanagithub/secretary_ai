@@ -1,0 +1,100 @@
+21:09:22 debug_log BUILD=diagnostic-1 ready module=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/debug_log.py path=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/debug.log
+21:09:22 assistant_flow BUILD=v32 loaded module=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/assistant_flow.py reminder_create BUILD=v32
+21:09:22 ui: BUILD=v31 loaded app=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/app_ui.py
+21:09:22 ui: reminder_create=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/reminder_create.py
+21:09:22 ui: reminder_create BUILD=v32
+21:09:22 ui: wake_duration=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/wake_duration.py
+21:09:22 ui: assistant_flow=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/assistant_flow.py
+21:09:22 ui: assistant_flow BUILD=v32
+21:09:22 ui: MainView init BUILD=v31
+21:09:24 ui: render start
+21:10:01 popup: button "ทำต่อในโหมด "เตือนความจำ"" action entered
+21:10:01 popup: _close removing from parent=True
+21:10:01 popup: _close returned
+21:10:01 popup: callback returned
+21:10:01 reminder_create BUILD=v32 intent=False probes=create:False flex:False use:False folded:False
+21:10:01 ui: BUILD=v31 reminder_create matched=False call=None
+21:10:01 ui: BUILD=v31 local_list matched=False
+21:10:01 ui: render start
+21:10:01 ui: render calling format_chat
+21:10:01 ui: render set output.text done
+21:10:01 ui: render after _scroll_to_bottom
+21:10:01 ui: render end
+21:10:06 ui: render start
+21:10:06 ui: render calling format_chat
+21:10:06 ui: render set output.text done
+21:10:06 ui: render after _scroll_to_bottom
+21:10:06 ui: render end
+21:10:06 flow: run_actions start, 1 action(s)
+21:10:06 flow: showing NoTimeConfirmOverlay title=Scbleq จ่ายเงินปันผล
+21:10:11 popup: button "ตกลง (ไม่ระบุเวลา)" action entered
+21:10:11 popup: _close removing from parent=True
+21:10:11 popup: _close returned
+21:10:11 flow: on_ok button pressed
+21:10:11 popup: callback returned
+21:10:12 flow: do_ok running (after delay)
+21:10:12 flow: _save start title=Scbleq จ่ายเงินปันผล
+21:10:12 reminders: saving all-day via EventKit
+21:10:12 reminders: all-day saved
+21:10:12 flow: _save done
+21:10:12 flow: do_ok calling step()
+21:10:12 flow: step - queue empty, calling finish
+21:10:12 flow: finish redo=False saved=True
+21:10:12 ui: on_actions_done start
+21:10:12 ui: _finish_turn start
+21:10:12 ui: _finish_turn before append_turn
+21:10:12 ui: _finish_turn append_turn success
+21:10:12 ui: _finish_turn before delayed render
+21:10:12 ui: _finish_turn end
+21:10:12 ui: on_actions_done after _finish_turn
+21:10:12 ui: on_actions_done end saved=True
+21:10:12 ui: render start
+21:10:12 ui: render calling format_chat
+21:10:12 ui: render set output.text done
+21:10:12 ui: render after _scroll_to_bottom
+21:10:12 ui: render end
+21:10:41 popup: button "ทำต่อในโหมด "เตือนความจำ"" action entered
+21:10:41 popup: _close removing from parent=True
+21:10:41 popup: _close returned
+21:10:41 popup: callback returned
+21:10:41 reminder_create BUILD=v32 intent=False probes=create:False flex:False use:False folded:False
+21:10:41 ui: BUILD=v31 reminder_create matched=False call=None
+21:10:41 ui: BUILD=v31 local_list matched=False
+21:10:41 ui: render start
+21:10:41 ui: render calling format_chat
+21:10:41 ui: render set output.text done
+21:10:41 ui: render after _scroll_to_bottom
+21:10:41 ui: render end
+21:10:56 ui: render start
+21:10:56 ui: render calling format_chat
+21:10:56 ui: render set output.text done
+21:10:56 ui: render after _scroll_to_bottom
+21:10:56 ui: render end
+21:10:56 flow: run_actions start, 1 action(s)
+21:10:56 flow: showing NoTimeConfirmOverlay title=จ่ายเงินปันผล
+21:11:05 popup: button "ตกลง (ไม่ระบุเวลา)" action entered
+21:11:05 popup: _close removing from parent=True
+21:11:05 popup: _close returned
+21:11:05 flow: on_ok button pressed
+21:11:05 popup: callback returned
+21:11:05 flow: do_ok running (after delay)
+21:11:05 flow: _save start title=จ่ายเงินปันผล
+21:11:05 reminders: saving all-day via EventKit
+21:11:05 reminders: all-day saved
+21:11:05 flow: _save done
+21:11:05 flow: do_ok calling step()
+21:11:05 flow: step - queue empty, calling finish
+21:11:05 flow: finish redo=False saved=True
+21:11:05 ui: on_actions_done start
+21:11:05 ui: _finish_turn start
+21:11:05 ui: _finish_turn before append_turn
+21:11:05 ui: _finish_turn append_turn success
+21:11:05 ui: _finish_turn before delayed render
+21:11:05 ui: _finish_turn end
+21:11:05 ui: on_actions_done after _finish_turn
+21:11:05 ui: on_actions_done end saved=True
+21:11:05 ui: render start
+21:11:05 ui: render calling format_chat
+21:11:05 ui: render set output.text done
+21:11:05 ui: render after _scroll_to_bottom
+21:11:05 ui: render end
