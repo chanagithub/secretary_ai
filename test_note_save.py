@@ -3,8 +3,8 @@ from urllib.parse import urlencode, quote
 
 SHORTCUT_NAME = 'AI SaveToNote'
 MODE = 'append'   # ลอง 'new' ก่อน แล้วค่อยเปลี่ยนเป็น 'append'
-TITLE = 'ทดสอบเลขา AI'
-BODY = '17 ต.ค. 2026\nเพลงทดสอบ 1\nเพลงทดสอบ 2'
+TITLE = 'ทดสอบสร้างใหม่'
+BODY = '19 ต.ค. 2026\nเพลงทดสอบ 1\nเพลงทดสอบ 2'
 
 payload = json.dumps({'MODE': MODE, 'TITLE': TITLE, 'BODY': BODY},
                      ensure_ascii=False)

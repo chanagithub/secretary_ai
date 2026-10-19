@@ -98,3 +98,78 @@
 21:11:05 ui: render set output.text done
 21:11:05 ui: render after _scroll_to_bottom
 21:11:05 ui: render end
+11:13:16 debug_log BUILD=diagnostic-1 ready module=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/debug_log.py path=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/debug.log
+11:13:16 assistant_flow BUILD=v32 loaded module=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/assistant_flow.py reminder_create BUILD=v32
+11:13:16 ui: BUILD=v31 loaded app=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/app_ui.py
+11:13:16 ui: reminder_create=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/reminder_create.py
+11:13:16 ui: reminder_create BUILD=v32
+11:13:16 ui: wake_duration=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/wake_duration.py
+11:13:16 ui: assistant_flow=/private/var/mobile/Containers/Data/Application/4D244BB0-B018-4951-AD43-6817EE29DD52/Documents/secretary_ai/assistant_flow.py
+11:13:16 ui: assistant_flow BUILD=v32
+11:13:16 ui: MainView init BUILD=v31
+11:13:18 ui: render start
+11:14:03 reminder_create BUILD=v32 intent=False probes=create:False flex:False use:False folded:False
+11:14:03 ui: BUILD=v31 reminder_create matched=False call=None
+11:14:03 ui: BUILD=v31 local_list matched=True
+11:14:03 ui: render start
+11:14:03 ui: render calling format_chat
+11:14:03 ui: render set output.text done
+11:14:03 ui: render after _scroll_to_bottom
+11:14:03 ui: render end
+11:14:04 flow: run_actions start, 1 action(s)
+11:14:04 flow: step - queue empty, calling finish
+11:14:04 flow: finish redo=False saved=False
+11:14:04 ui: on_actions_done start
+11:14:04 ui: _finish_turn start
+11:14:04 ui: _finish_turn before append_turn
+11:14:04 ui: _finish_turn append_turn success
+11:14:04 ui: _finish_turn before delayed render
+11:14:04 ui: _finish_turn end
+11:14:04 ui: on_actions_done after _finish_turn
+11:14:04 ui: on_actions_done end saved=False
+11:14:04 ui: render start
+11:14:04 ui: render calling format_chat
+11:14:04 ui: render set output.text done
+11:14:04 ui: render after _scroll_to_bottom
+11:14:04 ui: render end
+11:14:36 reminder_create BUILD=v32 intent=True title=True relative=False absolute=False
+11:14:36 ui: BUILD=v31 reminder_create matched=False call=None
+11:14:36 assistant_flow BUILD=v32 local_list blocked=create_intent
+11:14:36 ui: BUILD=v31 local_list matched=False
+11:14:36 ui: render start
+11:14:36 ui: render calling format_chat
+11:14:36 ui: render set output.text done
+11:14:36 ui: render after _scroll_to_bottom
+11:14:36 ui: render end
+11:14:38 ui: _finish_turn start
+11:14:38 ui: _finish_turn before append_turn
+11:14:38 ui: _finish_turn append_turn success
+11:14:38 ui: _finish_turn before delayed render
+11:14:38 ui: _finish_turn end
+11:14:38 ui: render start
+11:14:38 ui: render calling format_chat
+11:14:38 ui: render set output.text done
+11:14:38 ui: render after _scroll_to_bottom
+11:14:38 ui: render end
+11:15:12 popup: button "ทำต่อในโหมด "เตือนความจำ"" action entered
+11:15:12 popup: _close removing from parent=True
+11:15:12 popup: _close returned
+11:15:12 popup: callback returned
+11:15:12 reminder_create BUILD=v32 intent=False probes=create:False flex:False use:False folded:False
+11:15:12 ui: BUILD=v31 reminder_create matched=False call=None
+11:15:12 ui: BUILD=v31 local_list matched=False
+11:15:12 ui: render start
+11:15:12 ui: render calling format_chat
+11:15:12 ui: render set output.text done
+11:15:12 ui: render after _scroll_to_bottom
+11:15:12 ui: render end
+11:15:15 ui: _finish_turn start
+11:15:15 ui: _finish_turn before append_turn
+11:15:15 ui: _finish_turn append_turn success
+11:15:15 ui: _finish_turn before delayed render
+11:15:15 ui: _finish_turn end
+11:15:15 ui: render start
+11:15:15 ui: render calling format_chat
+11:15:15 ui: render set output.text done
+11:15:15 ui: render after _scroll_to_bottom
+11:15:15 ui: render end
