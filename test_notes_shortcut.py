@@ -7,7 +7,7 @@ import time
 
 import notes_shortcut
 
-DO_SAVE = False
+DO_SAVE = True
 
 
 class Tester:
