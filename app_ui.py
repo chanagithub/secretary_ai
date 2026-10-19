@@ -3,10 +3,11 @@
 ตั้งชื่อ app_ui แทน ui เพราะชื่อ ui จะไปบังโมดูล ui ของ Pythonista
 ลำดับงานกับ AI (เลือกวัน, tool calling, ยืนยัน, บันทึก) อยู่ใน assistant_flow.py
 รันไฟล์นี้ใน Pythonista (ต้องมี config.py, ai_client.py, chat_views.py, overlays.py,
-assistant_flow.py, tools.py, date_guard.py, reminders_tool.py อยู่โฟลเดอร์เดียวกัน)
+assistant_flow.py, tools.py, date_guard.py, reminders_tool.py, notes_flow.py (+ notes_tools.py,
+notes_shortcut.py) อยู่โฟลเดอร์เดียวกัน)
 """
-# ===== BUILD MARKER: ถ้าไม่เห็น v31 แสดงว่ายังรันไฟล์เก่า =====
-BUILD = 'v31'
+# ===== BUILD MARKER: ถ้าไม่เห็น v32 แสดงว่ายังรันไฟล์เก่า =====
+BUILD = 'v32'
 print('>>> app_ui BUILD=%s file=%s' % (BUILD, __file__))
 
 import threading
@@ -20,6 +21,7 @@ import assistant_flow
 import reminder_create
 import wake_duration
 import finance_flow
+import notes_flow
 import modes
 import search_terms
 from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
@@ -413,7 +415,12 @@ class MainView(ui.View):
 
     def begin_request_unchecked(self, text):
         """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
-        self._active_flow = finance_flow if self.mode_ctl.mode == modes.ACCOUNTS else assistant_flow
+        mode = self.mode_ctl.mode
+        self._active_flow = (finance_flow if mode == modes.ACCOUNTS
+                             else notes_flow if mode == modes.NOTES else assistant_flow)
+        if self._active_flow is notes_flow:  # โหมดโน้ต: ไม่ใช้เส้นทางเตือนความจำ ส่งให้ AI ตรง ๆ
+            self.start_request(text, text)
+            return
         if self._active_flow is finance_flow:
             if finance_flow.ask_date_first(self, text):
                 return

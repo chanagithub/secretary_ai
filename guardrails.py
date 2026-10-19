@@ -11,12 +11,15 @@ import re
 REMINDERS = 'reminders'
 ACCOUNTS = 'accounts'
 ASSETS = 'assets'
+NOTES = 'notes'
 
 _DIGITS = str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789')
 
 # คำที่บ่งว่าเป็นงานเตือนความจำ (ชนะเสมอ เช่น "เตือนจ่ายค่าไฟ 500 บาท")
 _REMINDER_WORDS = ('เตือน', 'นัด', 'ปลุก', 'ประชุม', 'อย่าลืม', 'ลบทิ้ง', 'เลื่อน',
                    'reminder', 'alarm')
+# พูดถึงโน้ต (ผู้ใช้สะกดทั้ง โน้ต/โน๊ต) -> โหมดโน้ต; ตรวจหลังคำเตือน ก่อนคำการเงิน
+_NOTE_WORDS = ('โน้ต', 'โน๊ต')
 # คำถาม/ค้นย้อนหลัง ไม่ใช่การบันทึกรายการ
 _QUESTION_WORDS = ('กี่', 'เท่าไหร่', 'เท่าไร', 'ไหม', 'หรือเปล่า', 'ที่ผ่านมา',
                    'ย้อนหลัง', 'ในอดีต', 'ก่อนหน้า', 'ทั้งหมด', 'ยอดรวม', 'รายการ')
@@ -31,12 +34,14 @@ _MONEY_VERBS = ('จ่าย', 'ซื้อ', 'ใช้จ่าย', 'ค่
 
 
 def detect_mode(text):
-    """คืน 'reminders' / 'accounts' / 'assets' หรือ None ถ้าไม่แน่ใจ"""
+    """คืน 'reminders' / 'accounts' / 'assets' / 'notes' หรือ None ถ้าไม่แน่ใจ"""
     t = (text or '').translate(_DIGITS).lower()
     if not t.strip():
         return None
     if any(w in t for w in _REMINDER_WORDS):
         return REMINDERS
+    if any(w in t for w in _NOTE_WORDS):
+        return NOTES
     if any(w in t for w in _FINANCE_QUERY_WORDS):
         return ACCOUNTS
     if ('ขายหุ้น' in t and any(w in t for w in
@@ -53,6 +58,8 @@ def detect_mode(text):
 
 def mode_hint(current, text):
     """โหมดที่ควรแนะนำให้สลับ (None = ไม่ต้องเตือน)"""
+    if current == NOTES:  # เนื้อโน้ตมีคำอะไรก็ได้ (นัด, บาท ฯลฯ) ในโหมดโน้ตไม่เตือนสลับโหมด
+        return None
     detected = detect_mode(text)
     if detected is not None and detected != current:
         return detected

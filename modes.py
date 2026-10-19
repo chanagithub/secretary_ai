@@ -1,4 +1,4 @@
-"""modes.py - โหมดของ AI เลขา (เตือนความจำ / รายรับรายจ่าย / การลงทุน)
+"""modes.py - โหมดของ AI เลขา (เตือนความจำ / รายรับรายจ่าย / การลงทุน / โน้ต)
 
 เก็บโหมดล่าสุดใน mode.json (แยกจาก settings.json เพราะ config._save เขียนทับทั้งไฟล์)
 ENABLED = โหมดที่เปิดใช้แล้ว; โหมดอื่นกดได้แต่ขึ้น "ยังไม่เปิดใช้" และไม่สลับ
@@ -10,12 +10,14 @@ import os
 REMINDERS = 'reminders'
 ACCOUNTS = 'accounts'
 ASSETS = 'assets'
+NOTES = 'notes'
 
-KEYS = (REMINDERS, ACCOUNTS, ASSETS)
+KEYS = (REMINDERS, ACCOUNTS, ASSETS, NOTES)
 LABELS = {REMINDERS: 'เตือนความจำ',
           ACCOUNTS: 'รายรับรายจ่าย',
-          ASSETS: 'การลงทุน'}
-ENABLED = {REMINDERS, ACCOUNTS}
+          ASSETS: 'การลงทุน',
+          NOTES: 'โน้ต'}
+ENABLED = {REMINDERS, ACCOUNTS, NOTES}
 
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mode.json')
 

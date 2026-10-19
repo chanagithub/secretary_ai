@@ -1,4 +1,4 @@
-"""mode_bar.py - แถบปุ่มเลือกโหมด 3 ปุ่ม (วางใต้ชื่อแอป)
+"""mode_bar.py - แถบปุ่มเลือกโหมด 4 ปุ่ม (วางใต้ชื่อแอป)
 
 ModeBar(on_select): กดปุ่ม -> เรียก on_select(key) (ต้องเป็น bound method)
 refresh(current): ระบายสีปุ่มของโหมดที่ใช้อยู่ โหมดที่ยังไม่เปิดใช้เป็นสีเทา
@@ -16,7 +16,7 @@ class ModeBar(ui.View):
             b = ui.Button()
             b.name = key
             b.title = modes.label(key)
-            b.font = ('<system-bold>', 13)
+            b.font = ('<system-bold>', 12)
             b.corner_radius = 8
             b.border_width = 1
             b.action = self._pressed
@@ -24,7 +24,7 @@ class ModeBar(ui.View):
             self._mode_buttons.append(b)
 
     def layout(self):
-        gap = 8
+        gap = 6
         n = len(self._mode_buttons)
         w = (self.width - gap * (n - 1)) / n
         for i, b in enumerate(self._mode_buttons):
