@@ -117,6 +117,12 @@ def _requests_empty_new_note(source):
     return bool(_NEW_NOTE_RE.search(source) and _NO_BODY_RE.search(source))
 
 
+def _has_explicit_title_command(source):
+    return bool(re.search(
+        r'^\s*(?:(?:สร้าง|ทำ)\s*โน[้๊]ต\s*ใหม่\s*)?(?:บันทึก\s*)?(?:โน[้๊]ต\s*)?ชื่อ(?:ว่า)?\s*[:：]?',
+        str(source or ''), re.I))
+
+
 def _title_from_request(source):
     prefix = re.split(
         r'\s*(?:มี)?(?:เนื้อหา|ข้อความ)(?:\s*ว่า)?|\s*(?:บันทึก|จด)\s*ว่า|\s*ให้บันทึก\s*ว่า',
@@ -155,6 +161,9 @@ def infer_title_only_request(source):
         return ''
     if _requests_empty_new_note(text):
         return _title_from_request(text)
+    # "บันทึก [ข้อความ]" คือให้บันทึกข้อความ; ต้องมีคำว่า "ชื่อ" จึงเป็นคำสั่งตั้งชื่อโน้ตเปล่า
+    if re.match(r'^\s*(?:ช่วย\s*)?(?:บันทึก|จดบันทึก|จด)\s+', text, re.I):
+        return _title_from_request(text) if _has_explicit_title_command(text) else ''
     return _title_from_request(text)
 
 
@@ -162,12 +171,21 @@ def infer_explicit_body_request(source):
     """แยกคำสั่งที่มีตัวบอกเนื้อหาชัดเจนไว้สำรองเมื่อ AI ไม่เรียกเครื่องมือ"""
     text = str(source or '').strip()
     if not _has_explicit_body(text):
+        if re.match(r'^\s*(?:ช่วย\s*)?(?:บันทึก|จดบันทึก|จด)\s+', text, re.I):
+            content = strip_command(text)
+            if content and not _has_explicit_title_command(text):
+                return {'title': suggest_title(content), 'content': content}
         return None
     content = _body_from_request(text)
     if not content:
         return None
     title = _title_from_request(text) or suggest_title(content)
     return {'title': title, 'content': content}
+
+
+def requested_mode(source):
+    """ใช้ต่อท้ายเมื่อคำสั่งมีคำว่า ต่อท้าย; กรณีอื่นสร้างโน้ตใหม่"""
+    return 'append' if 'ต่อท้าย' in str(source or '') else 'new'
 
 
 def validate_call(arguments, source_text):
@@ -189,7 +207,9 @@ def validate_call(arguments, source_text):
         if explicit_body:
             fallback = explicit_body
 
-    if not _has_explicit_body(source):
+    if not _has_explicit_body(source) and (
+            not re.match(r'^\s*(?:ช่วย\s*)?(?:บันทึก|จดบันทึก|จด)\s+', source, re.I)
+            or _has_explicit_title_command(source)):
         title = raw_title or _title_from_request(source)
         if title:
             return {'content': '', 'title': title, 'used_fallback': False}

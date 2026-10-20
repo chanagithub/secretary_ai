@@ -92,7 +92,8 @@ def prepare_actions(tool_calls, host=None):
             continue
         saves += 1
         actions.append({'kind': 'save', 'content': item['content'], 'title': item['title'],
-                        'used_fallback': item['used_fallback']})
+                        'used_fallback': item['used_fallback'],
+                        'mode': nt.requested_mode(call.get('source_text', ''))})
     return actions
 
 
@@ -161,14 +162,21 @@ class NotesRunner:
             self.step()
             return
         self.item = action
-        self.mode = None
+        self.mode = action.get('mode') or 'new'
         self.title = action['title']
+        if self.mode == 'append':
+            if not action['content'].strip():
+                self.lines.append('ยังไม่มีเนื้อหาที่จะต่อท้าย กรุณาระบุข้อความก่อนครับ')
+                self.step()
+                return
+            self.reader = notes_shortcut.NoteListReader(self.on_names, self.on_names_error)
+            self.reader.start()
+            return
         if not action['content'].strip():
             # ชื่ออย่างเดียวหมายถึงขอสร้างโน้ตเปล่า: แสดงยืนยันสร้างโดยตรง
-            self.mode = 'new'
             self.show_confirm()
             return
-        self.show_mode_choice()
+        self.show_title_ask()
 
     # ----- 1: สร้างใหม่ / ต่อโน้ตเดิม -----
     def show_mode_choice(self):
