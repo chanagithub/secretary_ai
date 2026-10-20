@@ -39,6 +39,18 @@ def ask_ai(sent_text, on_chunk, token, model, history):
         model=model, history=msgs,
         system_prompt=nt.system_prompt(datetime.date.today()))
     if not calls:
+        inferred_note = nt.infer_explicit_body_request(sent_text)
+        if inferred_note:
+            return '', [{'name': nt.TOOL_NAME,
+                         'arguments': inferred_note,
+                         'source_text': sent_text}]
+        inferred_title = nt.infer_title_only_request(sent_text)
+        if inferred_title:
+            # กรณีพิมพ์แค่ชื่อ AI อาจตอบเป็นข้อความแทนเรียกเครื่องมือ
+            # ในโหมดโน้ตให้ตีความเป็นคำขอสร้างโน้ตเปล่าและให้ผู้ใช้ยืนยันก่อน
+            return '', [{'name': nt.TOOL_NAME,
+                         'arguments': {'content': '', 'title': inferred_title},
+                         'source_text': sent_text}]
         if not (text or '').strip():
             debug_log('notes: AI returned no text or tool call')
             return '', [_note('AI ยังไม่ได้ส่งคำสั่งกลับมา กรุณาส่งคำสั่งเดิมอีกครั้ง')]
@@ -70,6 +82,11 @@ def prepare_actions(tool_calls, host=None):
             continue
         try:
             item = nt.validate_call(call.get('arguments'), call.get('source_text', ''))
+        except nt.NotesToolNeedContent as e:
+            if host is not None:
+                host._keep_context = True
+            actions.append({'kind': 'note', 'text': str(e)})
+            continue
         except nt.NotesToolError as e:
             actions.append({'kind': 'note', 'text': 'ตรวจค่าไม่ผ่าน: %s' % e})
             continue
@@ -146,17 +163,26 @@ class NotesRunner:
         self.item = action
         self.mode = None
         self.title = action['title']
+        if not action['content'].strip():
+            # ชื่ออย่างเดียวหมายถึงขอสร้างโน้ตเปล่า: แสดงยืนยันสร้างโดยตรง
+            self.mode = 'new'
+            self.show_confirm()
+            return
         self.show_mode_choice()
 
     # ----- 1: สร้างใหม่ / ต่อโน้ตเดิม -----
     def show_mode_choice(self):
-        preview = self.item['content'].replace('\n', ' ')
+        preview = self.item['content'].replace('\n', ' ').strip()
+        if not preview:
+            preview = '(ไม่มีเนื้อหา)'
         if len(preview) > 40:
             preview = preview[:40] + '...'
+        options = [('สร้างโน้ตใหม่', 'new')]
+        if self.item['content'].strip():
+            options.append(('ต่อโน้ตเดิม', 'append'))
         self.host.show_overlay(ChoiceOverlay(
             'บันทึกลงโน้ต\n"%s"' % preview,
-            [('สร้างโน้ตใหม่', 'new'), ('ต่อโน้ตเดิม', 'append')],
-            self.on_mode_pick, self.on_cancel))
+            options, self.on_mode_pick, self.on_cancel))
 
     def on_mode_pick(self, value):
         self._pick = value

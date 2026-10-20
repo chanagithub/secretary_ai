@@ -20,6 +20,11 @@ import notes_shortcut
 TOOL_NAME = 'save_note'
 MAX_CONTENT = 4000   # เพดานความปลอดภัย (ค่าประมาณ ไม่ใช่ขีดจำกัดที่ทดสอบแล้วของ Shortcuts)
 MAX_TITLE = 60
+_NEW_NOTE_RE = re.compile(r'(?:สร้าง|ทำ)\s*โน[้๊]ต\s*ใหม่')
+_NO_BODY_RE = re.compile(
+    r'(?:ไม่ต้อง(?:มี|ใส่)|ไม่มี|ไม่เอา|เว้นว่าง)\s*(?:เนื้อหา|body|ข้อความ)'
+    r'|(?:เนื้อหา|body|ข้อความ)\s*(?:ไม่ต้อง(?:มี|ใส่)|ไม่มี|ไม่เอา|ว่าง|เว้นว่าง)', re.I)
+_BODY_CUE_RE = re.compile(r'(?:มีเนื้อหา|เนื้อหาว่า|ข้อความว่า|บันทึกว่า|จดว่า|ให้บันทึกว่า|คือ)', re.I)
 SENT_LINE = ('ส่งคำสั่งไปยัง Shortcut แล้ว (แอปยืนยันผลไม่ได้ '
              'ตรวจโน้ตในโฟลเดอร์ "%s" ได้เลย)' % notes_shortcut.FOLDER_NAME)
 
@@ -34,6 +39,10 @@ _CMD_RE = re.compile(
 
 class NotesToolError(Exception):
     """ข้อผิดพลาดที่มีข้อความภาษาไทยพร้อมแสดงให้ผู้ใช้อ่าน"""
+
+
+class NotesToolNeedContent(NotesToolError):
+    """ต้องถามเนื้อหาเพิ่มก่อนสร้างโน้ต"""
 
 
 # ---------- ส่งให้ AI ----------
@@ -51,7 +60,7 @@ def schemas():
                         'type': 'string',
                         'description': ('เนื้อหาที่จะบันทึก ต้องเป็นคำพูดของผู้ใช้ตามเดิมทุกคำ '
                                         'ตัดได้เฉพาะคำสั่งนำหน้า เช่น "บันทึก" "ช่วยจดว่า" '
-                                        'ห้ามแต่งเพิ่ม สรุป แปล หรือแก้คำ'),
+                                        'ห้ามแต่งเพิ่ม สรุป แปล หรือแก้คำ; เว้นว่างได้เฉพาะเมื่อผู้ใช้สั่งสร้างโน้ตว่างชัดเจน'),
                     },
                     'title': {
                         'type': 'string',
@@ -71,17 +80,21 @@ def system_prompt(today):
         'วันนี้คือ %s\n'
         'โหมดนี้ใช้จดบันทึกลงแอป Notes เท่านั้น คุณมีเครื่องมือ %s\n'
         'กติกา:\n'
-        '1. เมื่อผู้ใช้สั่งให้บันทึก/จดเรื่องใด ให้เรียก %s ทันที '
-        'ห้ามพิมพ์สรุปเป็นข้อความแทนการเรียกเครื่องมือ\n'
-        '2. content ต้องเป็นคำพูดของผู้ใช้ตามเดิมทุกคำ ตัดได้เฉพาะคำสั่งนำหน้า เช่น "บันทึก" "ช่วยจดว่า" '
-        'ห้ามแต่งเพิ่ม ห้ามสรุป ห้ามแปล ห้ามแก้คำหรือเติมวันที่\n'
-        '3. title เสนอชื่อโน้ตสั้น ๆ จากเรื่องที่ผู้ใช้พูด\n'
-        '4. ห้ามถามว่าจะสร้างโน้ตใหม่หรือต่อโน้ตเดิม และห้ามระบุชื่อโน้ตเดิม ระบบจะให้ผู้ใช้เลือกเอง\n'
-        '5. ห้ามบอกว่าบันทึกให้แล้ว ผู้ใช้จะเห็นหน้ายืนยันก่อนเสมอ\n'
-        '6. ถ้าผู้ใช้ไม่ได้สั่งให้บันทึก (เช่น ถามเรื่องอื่น หรือขอให้ค้น/อ่านโน้ต) '
+        '1. ถ้าผู้ใช้พิมพ์เพียงชื่อโน้ต หรือพูดว่า "บันทึกชื่อ [ชื่อ]" โดยไม่ระบุเนื้อหา '
+        'ให้เรียก %s ด้วย title เป็นชื่อนั้นและ content ว่าง ระบบจะแสดงหน้ายืนยันสร้างโน้ตเปล่า\n'
+        '2. ถ้าผู้ใช้สั่งสร้างโน้ตใหม่และระบุว่าไม่ต้องมีเนื้อหา ให้เรียก %s ด้วย title และ content ว่าง\n'
+        '3. ถ้าผู้ใช้ระบุเนื้อหา เช่น "บันทึกชื่อ [ชื่อ] มีเนื้อหาว่า [ข้อความ]" '
+        'ให้เรียก %s ด้วย title ตามชื่อ และ content เป็นเฉพาะ [ข้อความ]\n'
+        '4. เมื่อผู้ใช้บอกเนื้อหาที่ต้องการบันทึกแล้ว ให้เรียกเครื่องมือทันที ห้ามบอกว่าสำเร็จเอง\n'
+        '5. content ต้องเป็นคำพูดของผู้ใช้ตามเดิมทุกคำ ตัดได้เฉพาะคำสั่งนำหน้า เช่น "บันทึก" "ช่วยจดว่า" '
+        'ห้ามแต่งเพิ่ม ห้ามสรุป ห้ามแปล ห้ามแก้คำหรือเติมวันที่; ห้ามใช้ชื่อโน้ตแทนเนื้อหา\n'
+        '6. title ใช้ชื่อโน้ตที่ผู้ใช้ระบุ หรือเสนอชื่อสั้น ๆ จากเนื้อหา\n'
+        '7. ห้ามถามว่าจะสร้างโน้ตใหม่หรือต่อโน้ตเดิม ระบบจะให้ผู้ใช้เลือกเองเมื่อมีเนื้อหา\n'
+        '8. ถ้าผู้ใช้ไม่ได้สั่งบันทึก ไม่ได้ระบุชื่อโน้ต และไม่ได้ให้เนื้อหา '
+        '(เช่น ถามเรื่องอื่น หรือขอให้ค้น/อ่านโน้ต) '
         'ให้ตอบสั้น ๆ ว่าโหมดนี้ใช้จดบันทึกลงโน้ตเท่านั้น ยังค้นหรืออ่านโน้ตไม่ได้ '
         'ห้ามแต่งเนื้อหาโน้ตขึ้นเอง'
-        % (format_date_heading(today), TOOL_NAME, TOOL_NAME)
+        % (format_date_heading(today), TOOL_NAME, TOOL_NAME, TOOL_NAME)
     )
 
 
@@ -100,17 +113,87 @@ def suggest_title(content):
     return first[:30].strip()
 
 
-def validate_call(arguments, source_text):
-    """คืน {'content','title','used_fallback'}
+def _requests_empty_new_note(source):
+    return bool(_NEW_NOTE_RE.search(source) and _NO_BODY_RE.search(source))
 
-    content ของ AI ใช้ได้ต่อเมื่อ (1) เป็นส่วนหนึ่งของคำพูดผู้ใช้จริง (เทียบหลังรวมช่องว่าง ไม่สนตัวพิมพ์)
-    และ (2) ครอบคลุมเนื้อหาไม่ต่ำกว่า 70% ของคำพูดที่ตัดคำสั่งนำหน้าแล้ว (กัน AI ตัดเนื้อหาทิ้ง)
-    ไม่ผ่านข้อใดข้อหนึ่ง -> ใช้คำพูดผู้ใช้ที่ตัดคำสั่งนำหน้าแทน (used_fallback=True)
-    """
+
+def _title_from_request(source):
+    prefix = re.split(
+        r'\s*(?:มี)?(?:เนื้อหา|ข้อความ)(?:\s*ว่า)?|\s*(?:บันทึก|จด)\s*ว่า|\s*ให้บันทึก\s*ว่า',
+        source, maxsplit=1, flags=re.I)[0]
+    prefix = re.split(
+        r'\s*(?:body|เนื้อหา|ข้อความ)\s*(?:ไม่ต้อง|ไม่เอา|ไม่มี|ว่าง|เว้นว่าง)'
+        r'|\s*(?:ไม่ต้องมี|ไม่ต้องใส่|ไม่มี|ไม่เอา|เว้นว่าง)\s*(?:body|เนื้อหา|ข้อความ)',
+        prefix, maxsplit=1, flags=re.I)[0]
+    match = re.search(r'(?:โน[้๊]ต\s*)?ชื่อ(?:ว่า)?\s*[:：]?\s*(.+)$', prefix, re.I)
+    if match:
+        title = match.group(1)
+    else:
+        title = strip_command(prefix)
+        title = re.sub(r'^(?:สร้าง|ทำ)\s*โน[้๊]ต\s*ใหม่\s*', '', title, flags=re.I)
+    title = re.sub(r'^(?:โน[้๊]ต\s*)?ชื่อ(?:ว่า)?\s*', '', title, flags=re.I)
+    return title.strip().strip('"“”\'')[:MAX_TITLE].strip()
+
+
+def _has_explicit_body(source):
+    return bool(_BODY_CUE_RE.search(source))
+
+
+def _body_from_request(source):
+    match = re.search(
+        r'(?:มี)?(?:เนื้อหา|ข้อความ)\s*ว่า|(?:บันทึก|จด)\s*ว่า|ให้บันทึก\s*ว่า',
+        source, flags=re.I)
+    return source[match.end():].strip(' \t:：-') if match else ''
+
+
+def infer_title_only_request(source):
+    """คืนชื่อ เมื่อข้อความในโหมดโน้ตเป็นเพียงคำขอชื่อโน้ต ไม่ใช่คำถาม/ค้นหา"""
+    text = str(source or '').strip()
+    if not text or _has_explicit_body(text):
+        return ''
+    if re.search(r'(?:ค้น|หา|อ่าน|เปิด|แสดง|มีโน้ต|โน้ตไหน|อะไร|อย่างไร|ทำไม|ไหม|หรือไม่|\?)', text, re.I):
+        return ''
+    if _requests_empty_new_note(text):
+        return _title_from_request(text)
+    return _title_from_request(text)
+
+
+def infer_explicit_body_request(source):
+    """แยกคำสั่งที่มีตัวบอกเนื้อหาชัดเจนไว้สำรองเมื่อ AI ไม่เรียกเครื่องมือ"""
+    text = str(source or '').strip()
+    if not _has_explicit_body(text):
+        return None
+    content = _body_from_request(text)
+    if not content:
+        return None
+    title = _title_from_request(text) or suggest_title(content)
+    return {'title': title, 'content': content}
+
+
+def validate_call(arguments, source_text):
+    """คืน {'content','title','used_fallback'}; รองรับโน้ตว่างเมื่อผู้ใช้ระบุชัดเจน"""
     args = arguments if isinstance(arguments, dict) else {}
     source = str(source_text or '')
     fallback = strip_command(source)
+    raw_title = _norm(args.get('title'))[:MAX_TITLE].strip()
     ai_content = args.get('content')
+
+    if _requests_empty_new_note(source):
+        title = raw_title or _title_from_request(source)
+        if not title:
+            raise NotesToolError('ไม่พบชื่อโน้ต กรุณาระบุชื่อโน้ตใหม่ครับ')
+        return {'content': '', 'title': title, 'used_fallback': False}
+
+    if _has_explicit_body(source):
+        explicit_body = _body_from_request(source)
+        if explicit_body:
+            fallback = explicit_body
+
+    if not _has_explicit_body(source):
+        title = raw_title or _title_from_request(source)
+        if title:
+            return {'content': '', 'title': title, 'used_fallback': False}
+
     content = fallback
     used_fallback = True
     if isinstance(ai_content, str) and ai_content.strip():
@@ -119,11 +202,11 @@ def validate_call(arguments, source_text):
             content = ai_content.strip()
             used_fallback = False
     if not content.strip():
-        raise NotesToolError('ไม่พบเนื้อหาที่จะบันทึก บอกเนื้อหาต่อจากคำว่า "บันทึก" ได้เลยครับ')
+        raise NotesToolNeedContent('ต้องการบันทึกข้อความอะไรลงในโน้ตครับ?')
     if len(content) > MAX_CONTENT:
         raise NotesToolError('เนื้อหายาวเกินไป (%d ตัวอักษร เกิน %d) แบ่งบันทึกเป็นหลายครั้งครับ'
                              % (len(content), MAX_CONTENT))
-    title = _norm(args.get('title'))[:MAX_TITLE].strip() or suggest_title(content)
+    title = raw_title or suggest_title(content)
     if not title:
         raise NotesToolError('ตั้งชื่อโน้ตไม่ได้ กรุณาพูดใหม่อีกครั้ง')
     return {'content': content, 'title': title, 'used_fallback': used_fallback}
@@ -186,7 +269,7 @@ def format_confirm_body(mode, title, body, warning=''):
     lines = ['โฟลเดอร์: %s' % notes_shortcut.FOLDER_NAME,
              'ชื่อโน้ต: %s' % title,
              'วิธี: %s' % ('ต่อท้ายโน้ตเดิม' if mode == 'append' else 'สร้างโน้ตใหม่'),
-             'เนื้อหาที่จะบันทึก:', body]
+             'เนื้อหาที่จะบันทึก:', body if body else '(ไม่มีเนื้อหา)']
     if warning:
         lines.append('⚠ %s' % warning)
     return '\n'.join(lines)

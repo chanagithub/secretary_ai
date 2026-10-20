@@ -53,8 +53,8 @@ def build_save_url(mode, title, body):
     body = str(body or '').strip()
     if not title:
         raise NotesShortcutError('ชื่อโน้ตว่างไม่ได้')
-    if not body:
-        raise NotesShortcutError('เนื้อหาโน้ตว่างไม่ได้')
+    if not body and mode != 'new':
+        raise NotesShortcutError('เนื้อหาสำหรับต่อท้ายโน้ตว่างไม่ได้')
     payload = json.dumps({'MODE': mode, 'TITLE': title, 'BODY': body},
                          ensure_ascii=False)
     return _run_url(SAVE_SHORTCUT_NAME, {'input': 'text', 'text': payload})
