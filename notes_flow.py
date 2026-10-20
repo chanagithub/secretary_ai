@@ -242,7 +242,9 @@ class NotesRunner:
 
     # ----- 2ข: ต่อโน้ตเดิม เลือกจากรายการ -----
     def on_names(self, names):
-        self.names = list(names)
+        # ตรวจซ้ำที่ชั้น UI ด้วย เผื่อแหล่งรายชื่อหรือคลิปบอร์ดส่งค่า 0 ปะปนมา
+        self.names = [str(name).strip() for name in names
+                      if str(name).strip() and str(name).strip() != '0']
         ui.delay(self.do_names, 0.3)
 
     @_guarded
