@@ -111,6 +111,7 @@ class NotesRunner:
         self.reader = None
         self._pick = None
         self._text = None
+        self.append_timestamp = None
 
     # ----- คิว -----
     def start(self):
@@ -243,11 +244,39 @@ class NotesRunner:
             self.lines.append('ไม่ได้ส่ง: %s' % warning)
             self.step()
             return
+        self.show_append_timestamp_choice()
+
+    # ----- เลือกว่าจะใส่วันและเวลาในข้อความต่อท้ายหรือไม่ -----
+    def show_append_timestamp_choice(self):
+        self.host.show_overlay(ChoiceOverlay(
+            'เพิ่มวันที่และเวลาปัจจุบันไหม?',
+            [('เพิ่มวันที่และเวลา', 'with_timestamp'),
+             ('ไม่เพิ่มวันที่และเวลา', 'without_timestamp')],
+            self.on_append_timestamp_pick, self.on_cancel))
+
+    def on_append_timestamp_pick(self, value):
+        self._pick = value
+        ui.delay(self.do_append_timestamp_pick, 0.3)
+
+    @_guarded
+    def do_append_timestamp_pick(self):
+        self.append_timestamp = (datetime.datetime.now()
+                                 if self._pick == 'with_timestamp' else None)
         self.show_confirm()
 
     # ----- 3: ยืนยันสุดท้าย -----
+    def _build_body(self):
+        content = self.item['content']
+        if self.mode == 'append':
+            if self.append_timestamp is None:
+                return content
+            heading = nt.format_date_heading(self.append_timestamp.date())
+            heading += self.append_timestamp.strftime(' %H:%M')
+            return '%s\n%s' % (heading, content)
+        return nt.build_body(self.mode, content, datetime.date.today())
+
     def show_confirm(self):
-        body = nt.build_body(self.mode, self.item['content'], datetime.date.today())
+        body = self._build_body()
         warning = ('ไม่ได้ใช้เนื้อหาจาก AI (ไม่ตรงคำพูด) ใช้ข้อความที่คุณพูดตามเดิม'
                    if self.item['used_fallback'] else '')
         self.host.show_overlay(ConfirmOverlay(
@@ -260,7 +289,7 @@ class NotesRunner:
 
     @_guarded
     def do_ok(self):
-        body = nt.build_body(self.mode, self.item['content'], datetime.date.today())
+        body = self._build_body()
         try:
             notes_shortcut.send_save(self.mode, self.title, body)
         except notes_shortcut.NotesShortcutError as e:
