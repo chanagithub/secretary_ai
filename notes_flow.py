@@ -273,6 +273,10 @@ class NotesRunner:
     @_guarded
     def do_note_pick(self):
         self.title = self._pick
+        if str(self.title or '').strip() == '0':
+            self.lines.append('รายชื่อโน้ตจาก Shortcut ไม่ถูกต้อง (ได้ค่า 0) ยังไม่ได้ส่งคำสั่งต่อท้าย')
+            self.step()
+            return
         warning = nt.conflict_text(self.title, self.names)
         if warning:  # ชื่อซ้ำ/ซ้อน: ไม่ส่ง กันต่อท้ายผิดโน้ต
             self.lines.append('ไม่ได้ส่ง: %s' % warning)

@@ -53,6 +53,8 @@ def build_save_url(mode, title, body):
     body = str(body or '').strip()
     if not title:
         raise NotesShortcutError('ชื่อโน้ตว่างไม่ได้')
+    if mode == 'append' and title == '0':
+        raise NotesShortcutError('ชื่อโน้ตที่เลือกไม่ถูกต้อง (ได้ค่า 0) กรุณาเลือกโน้ตจากรายการใหม่')
     if not body and mode != 'new':
         raise NotesShortcutError('เนื้อหาสำหรับต่อท้ายโน้ตว่างไม่ได้')
     payload = json.dumps({'MODE': mode, 'TITLE': title, 'BODY': body},
@@ -74,11 +76,9 @@ def parse_names(text):
     names = []
     for line in str(text or '').replace('\r', '\n').split('\n'):
         name = line.strip()
-        if name:
+        # Shortcuts อาจคืนค่า 0 ปะปนมากับชื่อโน้ตจริง; 0 ไม่ใช่ชื่อที่ควรเลือก
+        if name and name != '0':
             names.append(name)
-    # Shortcut รายชื่อเคยส่ง "0" แทนรายชื่อ ทำให้ UI เข้าใจผิดว่าเป็นชื่อโน้ต
-    if names == ['0']:
-        return []
     return names
 
 
