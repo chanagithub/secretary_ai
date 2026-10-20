@@ -70,12 +70,15 @@ def send_save(mode, title, body):
 
 
 def parse_names(text):
-    """แยกข้อความจากคลิปบอร์ด (ชื่อโน้ตบรรทัดละชื่อ) เป็น list ตัดบรรทัดว่างและช่องว่างหัวท้าย"""
+    """แยกข้อความจากคลิปบอร์ดเป็นชื่อโน้ต; ค่า 0 เดี่ยวถือเป็นผลลัพธ์ผิดพลาด"""
     names = []
     for line in str(text or '').replace('\r', '\n').split('\n'):
         name = line.strip()
         if name:
             names.append(name)
+    # Shortcut รายชื่อเคยส่ง "0" แทนรายชื่อ ทำให้ UI เข้าใจผิดว่าเป็นชื่อโน้ต
+    if names == ['0']:
+        return []
     return names
 
 
