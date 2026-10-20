@@ -94,7 +94,7 @@ def system_prompt(today):
         '(เช่น ถามเรื่องอื่น หรือขอให้ค้น/อ่านโน้ต) '
         'ให้ตอบสั้น ๆ ว่าโหมดนี้ใช้จดบันทึกลงโน้ตเท่านั้น ยังค้นหรืออ่านโน้ตไม่ได้ '
         'ห้ามแต่งเนื้อหาโน้ตขึ้นเอง'
-        % (format_date_heading(today), TOOL_NAME, TOOL_NAME, TOOL_NAME)
+        % (format_date_heading(today), TOOL_NAME, TOOL_NAME, TOOL_NAME, TOOL_NAME)
     )
 
 
