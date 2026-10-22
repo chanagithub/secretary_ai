@@ -15,7 +15,7 @@ import ui
 from overlays import _Popup, _BLUE, _GREEN, _GRAY
 from debug_log import log as debug_log
 
-FINANCE_OVERLAYS_BUILD = 'notes-no-reuse-1'
+FINANCE_OVERLAYS_BUILD = 'notes-deferred-pick-1'
 debug_log('finance_overlays BUILD=%s loaded' % FINANCE_OVERLAYS_BUILD)
 
 
@@ -101,6 +101,8 @@ class ListPickOverlay(_CardView):
         self._on_pick = on_pick
         self._on_cancel = on_cancel
         self._keep_open = bool(keep_open)
+        self._pending = False  # แตะแถวแล้ว รอถอดป๊อปอัปหลัง callback ของตารางจบ
+        self._picked = None
         self._ds = ui.ListDataSource([{'title': label} for label, _ in self._items])
         debug_log('finance list init: data source ready')
         self._ds.action = self._row_selected  # bound method (sender = data source)
@@ -132,8 +134,21 @@ class ListPickOverlay(_CardView):
         if self._keep_open:
             if self._on_pick is not None:
                 self._on_pick(value)
-        else:
-            self._finish(self._on_pick, value)
+            return
+        if self._pending:  # แตะซ้ำระหว่างรอ
+            return
+        # ไม่ถอดตัวเองใน callback ของตาราง (iOS 27 เสี่ยงทำหน่วยความจำเสียหาย)
+        # เก็บค่าไว้ก่อน แล้วค่อยถอด + เรียก callback หลังหน่วง 0.3 วินาที
+        self._pending = True
+        self._picked = value
+        debug_log('finance list selection: deferring close')
+        ui.delay(self._deferred_pick, 0.3)
+
+    def _deferred_pick(self):
+        value = self._picked
+        self._picked = None
+        debug_log('finance list deferred pick: running')
+        self._finish(self._on_pick, value)
 
     def _cancel_pressed(self, sender):
         self._finish(self._on_cancel)
