@@ -15,7 +15,7 @@ import ui
 from overlays import _Popup, _BLUE, _GREEN, _GRAY
 from debug_log import log as debug_log
 
-FINANCE_OVERLAYS_BUILD = 'notes-pick-trace-1'
+FINANCE_OVERLAYS_BUILD = 'notes-pick-trace-2'
 debug_log('finance_overlays BUILD=%s loaded' % FINANCE_OVERLAYS_BUILD)
 
 
@@ -40,7 +40,11 @@ class _CardView(ui.View):
     GAP = 10
 
     def __init__(self, title):
+        debug_log('finance card init: before ui.View class=%s' %
+                  type(self).__name__)
         super().__init__()
+        debug_log('finance card init: ui.View ready class=%s' %
+                  type(self).__name__)
         self.flex = 'WH'
         self.background_color = (0, 0, 0, 0.45)
         self._closing = False
@@ -55,6 +59,8 @@ class _CardView(ui.View):
         self.title_label.alignment = ui.ALIGN_CENTER
         self.title_label.number_of_lines = 0
         self.card.add_subview(self.title_label)
+        debug_log('finance card init: complete class=%s' %
+                  type(self).__name__)
 
     def _button(self, label, bg, fg, action):
         btn = ui.Button()
@@ -88,11 +94,14 @@ class ListPickOverlay(_CardView):
     ROW_H = 52
 
     def __init__(self, title, items, on_pick, on_cancel):
+        debug_log('finance list init: begin item_count=%d' % len(items))
         super().__init__(title)
+        debug_log('finance list init: card ready')
         self._items = list(items)
         self._on_pick = on_pick
         self._on_cancel = on_cancel
         self._ds = ui.ListDataSource([{'title': label} for label, _ in self._items])
+        debug_log('finance list init: data source ready')
         self._ds.action = self._row_selected  # bound method (sender = data source)
         self._ds.font = ('<system>', 17)
         try:
@@ -105,7 +114,9 @@ class ListPickOverlay(_CardView):
         self.table.data_source = self._ds
         self.table.delegate = self._ds
         self.card.add_subview(self.table)
+        debug_log('finance list init: table ready')
         self.cancel_btn = self._button('ยกเลิก', _GRAY, 'black', self._cancel_pressed)
+        debug_log('finance list init: complete')
 
     def _row_selected(self, sender):
         row = sender.selected_row
