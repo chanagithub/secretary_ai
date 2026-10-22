@@ -298,19 +298,23 @@ class NotesRunner:
             self.step()
             return
         warning = nt.conflict_text(self.title, self.names)
+        debug_log('notes append target checked: conflict=%s' % bool(warning))
         if warning:  # ชื่อซ้ำ/ซ้อน: ไม่ส่ง กันต่อท้ายผิดโน้ต
             self.lines.append('ไม่ได้ส่ง: %s' % warning)
             self.step()
             return
+        debug_log('notes append: opening timestamp choice')
         self.show_append_timestamp_choice()
 
     # ----- เลือกว่าจะใส่วันและเวลาในข้อความต่อท้ายหรือไม่ -----
     def show_append_timestamp_choice(self):
+        debug_log('notes append timestamp overlay: before show_overlay')
         self.host.show_overlay(ChoiceOverlay(
             'เพิ่มวันที่และเวลาปัจจุบันไหม?',
             [('เพิ่มวันที่และเวลา', 'with_timestamp'),
              ('ไม่เพิ่มวันที่และเวลา', 'without_timestamp')],
             self.on_append_timestamp_pick, self.on_cancel))
+        debug_log('notes append timestamp overlay: show_overlay returned')
 
     def on_append_timestamp_pick(self, value):
         self._pick = value
