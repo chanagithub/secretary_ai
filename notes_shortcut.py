@@ -26,7 +26,7 @@ from debug_log import log as debug_log
 LIST_SHORTCUT_NAME = 'ทดสอบรายชื่อโน้ต'
 SAVE_SHORTCUT_NAME = 'AI SaveToNote'
 FOLDER_NAME = 'เลขา AI'
-NOTES_DIAGNOSTIC_BUILD = 'notes-zero-trace-1'
+NOTES_DIAGNOSTIC_BUILD = 'notes-clipboard-wait-fix-1'
 MODES = ('new', 'append')
 
 _MARK = '__WAITING__'
@@ -92,6 +92,7 @@ class NoteListReader:
         self._on_error = on_error
         self._deadline = 0
         self._active = False
+        self._empty_clipboard_logged = False
 
     def start(self):
         if self._active:
@@ -126,7 +127,10 @@ class NoteListReader:
             return
         # ตรวจค่าก่อนตรวจเวลา: ตอนผู้ใช้สลับไป Shortcuts แอปอาจหยุดชั่วคราว
         # พอกลับมา ค่าใหม่อาจมาถึงแล้วแม้เกินเวลา
-        if value is not None and value != _MARK:
+        # An empty read can mean iOS has not granted/published clipboard content yet.
+        # Do not treat it as a completed empty note list; keep polling until data arrives
+        # or the existing timeout reports the likely paste-permission/Shortcut issue.
+        if value is not None and value != _MARK and str(value) != '':
             self._active = False
             raw_lines = str(value).replace('\r', '\n').split('\n')
             zero_lines = sum(1 for line in raw_lines if line.strip() == '0')
@@ -138,6 +142,9 @@ class NoteListReader:
                 pass
             self._on_done(parse_names(value))
             return
+        if value is not None and str(value) == '' and not self._empty_clipboard_logged:
+            self._empty_clipboard_logged = True
+            debug_log('notes list clipboard empty: still waiting')
         if time.time() > self._deadline:
             self._fail('ไม่ได้รับรายชื่อโน้ตจาก Shortcut ภายใน %d วินาที '
                        '(Shortcut ไม่ทำงาน หรือกด Don\'t Allow Paste)' % _TIMEOUT_SECONDS)
