@@ -24,7 +24,10 @@ from finance_overlays import ListPickOverlay, TextInputOverlay
 from debug_log import log as debug_log
 
 _PSEUDO_NOTE = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
-NOTES_DIAGNOSTIC_BUILD = 'notes-no-reuse-1'
+NOTES_DIAGNOSTIC_BUILD = 'notes-fake-names-1'
+# ทดลองแยกสาเหตุล่ม: True = ไม่เรียก Shortcut อ่านรายชื่อ ใช้ชื่อสมมติ 3 ชื่อ และไม่ส่งคำสั่งบันทึกจริง
+# ตั้งเป็น False เมื่อทดลองเสร็จ
+DEBUG_FAKE_NAMES = True
 debug_log('notes_flow BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
 
 
@@ -174,6 +177,10 @@ class NotesRunner:
             if not action['content'].strip():
                 self.lines.append('ยังไม่มีเนื้อหาที่จะต่อท้าย กรุณาระบุข้อความก่อนครับ')
                 self.step()
+                return
+            if DEBUG_FAKE_NAMES:
+                debug_log('notes: DEBUG_FAKE_NAMES on, skipping NoteListReader')
+                self.on_names(['Fake note 1', 'Fake note 2', 'Fake note 3'])
                 return
             self.reader = notes_shortcut.NoteListReader(self.on_names, self.on_names_error)
             self.reader.start()
@@ -365,6 +372,11 @@ class NotesRunner:
         debug_log('notes send: mode=%s title_empty=%s title_is_zero=%s' %
                   (self.mode, not bool(str(self.title or '').strip()),
                    str(self.title or '').strip() == '0'))
+        if DEBUG_FAKE_NAMES and self.mode == 'append':
+            debug_log('notes send: skipped (DEBUG_FAKE_NAMES)')
+            self.lines.append('(ทดลองรายชื่อสมมติ: ไม่ได้ส่งคำสั่งไปยัง Shortcut)')
+            self.step()
+            return
         try:
             notes_shortcut.send_save(self.mode, self.title, body)
         except notes_shortcut.NotesShortcutError as e:
