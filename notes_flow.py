@@ -24,7 +24,7 @@ from finance_overlays import ListPickOverlay, TextInputOverlay
 from debug_log import log as debug_log
 
 _PSEUDO_NOTE = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
-NOTES_DIAGNOSTIC_BUILD = 'notes-zero-trace-1'
+NOTES_DIAGNOSTIC_BUILD = 'notes-timestamp-picker-fix-1'
 debug_log('notes_flow BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
 
 
@@ -308,13 +308,13 @@ class NotesRunner:
 
     # ----- เลือกว่าจะใส่วันและเวลาในข้อความต่อท้ายหรือไม่ -----
     def show_append_timestamp_choice(self):
-        debug_log('notes append timestamp overlay: before show_overlay')
-        self.host.show_overlay(ChoiceOverlay(
+        debug_log('notes append timestamp list: before show_overlay')
+        self.host.show_overlay(ListPickOverlay(
             'เพิ่มวันที่และเวลาปัจจุบันไหม?',
             [('เพิ่มวันที่และเวลา', 'with_timestamp'),
              ('ไม่เพิ่มวันที่และเวลา', 'without_timestamp')],
             self.on_append_timestamp_pick, self.on_cancel))
-        debug_log('notes append timestamp overlay: show_overlay returned')
+        debug_log('notes append timestamp list: show_overlay returned')
 
     def on_append_timestamp_pick(self, value):
         self._pick = value
