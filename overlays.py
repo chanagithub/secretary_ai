@@ -8,6 +8,9 @@ ChoiceOverlay  = ให้เลือกตัวเลือกหนึ่ง
 import ui
 from debug_log import log as debug_log
 
+OVERLAYS_TRACE_BUILD = 'overlay-open-trace-1'
+debug_log('overlays BUILD=%s loaded' % OVERLAYS_TRACE_BUILD)
+
 _BLUE = '#007aff'
 _GREEN = '#34c759'
 _GRAY = '#e5e5ea'
@@ -23,6 +26,8 @@ class _Popup(ui.View):
     GAP = 10
 
     def __init__(self, title, body, buttons, body_height=0):
+        debug_log('popup init: before base title_chars=%d buttons=%d' %
+                  (len(str(title or '')), len(buttons)))
         super().__init__()
         self.flex = 'WH'
         self.background_color = (0, 0, 0, 0.45)
@@ -61,6 +66,8 @@ class _Popup(ui.View):
             btn.action = self._make_action(callback, label)
             self.card.add_subview(btn)
             self._buttons.append(btn)
+        debug_log('popup init: complete class=%s buttons=%d' %
+                  (type(self).__name__, len(self._buttons)))
 
     def _make_action(self, callback, label=''):
         def action(sender):
@@ -84,6 +91,8 @@ class _Popup(ui.View):
             parent.remove_subview(self)
 
     def layout(self):
+        debug_log('popup layout: start class=%s size=%r' %
+                  (type(self).__name__, (self.width, self.height)))
         pad, bh, gap = self.PAD, self.BTN_H, self.GAP
         n = len(self._buttons)
         cw = min(self.width - 32, 420)
@@ -106,6 +115,7 @@ class _Popup(ui.View):
         for btn in self._buttons:
             btn.frame = (pad, y, cw - 2 * pad, bh)
             y += bh + gap
+        debug_log('popup layout: end class=%s' % type(self).__name__)
 
 
 class ConfirmOverlay(_Popup):

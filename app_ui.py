@@ -9,6 +9,7 @@ notes_shortcut.py) อยู่โฟลเดอร์เดียวกัน)
 # ===== BUILD MARKER: ถ้าไม่เห็น v32 แสดงว่ายังรันไฟล์เก่า =====
 BUILD = 'v32'
 print('>>> app_ui BUILD=%s file=%s' % (BUILD, __file__))
+OVERLAY_TRACE_BUILD = 'overlay-open-trace-1'
 
 import threading
 
@@ -31,6 +32,7 @@ from debug_log import log as debug_log
 
 # บันทึกทันทีตอน import สำเร็จ (ก่อนเปิดหน้าจอ)
 debug_log('ui: BUILD=%s loaded app=%s' % (BUILD, __file__))
+debug_log('app_ui overlay trace BUILD=%s loaded' % OVERLAY_TRACE_BUILD)
 debug_log('ui: reminder_create=%s' % getattr(reminder_create, '__file__', '?'))
 debug_log('ui: reminder_create BUILD=%s' % getattr(reminder_create, 'BUILD', '?'))
 debug_log('ui: wake_duration=%s' % getattr(wake_duration, '__file__', '?'))
@@ -692,10 +694,17 @@ class MainView(ui.View):
 
     def show_overlay(self, overlay):
         """แสดงป๊อปอัปทับหน้าจอ (assistant_flow เรียกใช้)"""
+        debug_log('ui overlay: show_overlay before end_editing class=%s' %
+                  type(overlay).__name__)
         self.input.end_editing()
+        debug_log('ui overlay: end_editing returned')
         overlay.frame = self.bounds
         self._overlay = overlay
+        debug_log('ui overlay: before add_subview class=%s frame=%r' %
+                  (type(overlay).__name__, overlay.frame))
         self.add_subview(overlay)
+        debug_log('ui overlay: add_subview returned class=%s attached=%s' %
+                  (type(overlay).__name__, overlay.superview is self))
 
 
 def main():

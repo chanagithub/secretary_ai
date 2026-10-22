@@ -3,8 +3,13 @@
 ตั้งชื่อ app_ui แทน ui เพราะชื่อ ui จะไปบังโมดูล ui ของ Pythonista
 ลำดับงานกับ AI (เลือกวัน, tool calling, ยืนยัน, บันทึก) อยู่ใน assistant_flow.py
 รันไฟล์นี้ใน Pythonista (ต้องมี config.py, ai_client.py, chat_views.py, overlays.py,
-assistant_flow.py, tools.py, date_guard.py, reminders_tool.py อยู่โฟลเดอร์เดียวกัน)
+assistant_flow.py, tools.py, date_guard.py, reminders_tool.py, notes_flow.py (+ notes_tools.py,
+notes_shortcut.py) อยู่โฟลเดอร์เดียวกัน)
 """
+# ===== BUILD MARKER: ถ้าไม่เห็น v32 แสดงว่ายังรันไฟล์เก่า =====
+BUILD = 'v32'
+print('>>> app_ui BUILD=%s file=%s' % (BUILD, __file__))
+
 import threading
 
 import ui
@@ -16,6 +21,7 @@ import assistant_flow
 import reminder_create
 import wake_duration
 import finance_flow
+import notes_flow
 import modes
 import search_terms
 from chat_views import format_chat, HistorySource, ChatListSource, ChatViewer
@@ -23,14 +29,27 @@ from overlays import ChoiceOverlay
 from mode_flow import ModeController
 from debug_log import log as debug_log
 
+# บันทึกทันทีตอน import สำเร็จ (ก่อนเปิดหน้าจอ)
+debug_log('ui: BUILD=%s loaded app=%s' % (BUILD, __file__))
+debug_log('ui: reminder_create=%s' % getattr(reminder_create, '__file__', '?'))
+debug_log('ui: reminder_create BUILD=%s' % getattr(reminder_create, 'BUILD', '?'))
+debug_log('ui: wake_duration=%s' % getattr(wake_duration, '__file__', '?'))
+debug_log('ui: assistant_flow=%s' % getattr(assistant_flow, '__file__', '?'))
+debug_log('ui: assistant_flow BUILD=%s' % getattr(assistant_flow, 'BUILD', '?'))
 
-HINT_TEXT = 'พิมพ์ หรือกดไมค์บนคีย์บอร์ดเพื่อพูด แล้วกดส่ง'
+HINT_TEXT = '[%s] พิมพ์ หรือกดไมค์บนคีย์บอร์ดเพื่อพูด แล้วกดส่ง' % BUILD
 
 
 class MainView(ui.View):
     def __init__(self):
         super().__init__()
-        self.name = 'AI เลขาส่วนตัว'
+        debug_log('ui: MainView init BUILD=%s' % BUILD)
+        # แสดงบนหน้าจอทันที: ชื่อหน้าต่าง + toast
+        self.name = 'AI เลขา %s' % BUILD
+        try:
+            console.hud_alert('โหลด %s แล้ว' % BUILD, 'success', 2.0)
+        except Exception:
+            pass
         self.background_color = 'white'
         self._overlay = None
         self._token = None  # งานที่กำลังรอ AI อยู่ (None = ว่าง)
@@ -396,13 +415,20 @@ class MainView(ui.View):
 
     def begin_request_unchecked(self, text):
         """ถ้าพูดชื่อวันที่ตรงกับวันนี้ ถามผู้ใช้ด้วยปุ่มก่อน แล้วค่อยส่งให้ AI"""
-        self._active_flow = finance_flow if self.mode_ctl.mode == modes.ACCOUNTS else assistant_flow
+        mode = self.mode_ctl.mode
+        self._active_flow = (finance_flow if mode == modes.ACCOUNTS
+                             else notes_flow if mode == modes.NOTES else assistant_flow)
+        if self._active_flow is notes_flow:  # โหมดโน้ต: ไม่ใช้เส้นทางเตือนความจำ ส่งให้ AI ตรง ๆ
+            self.start_request(text, text)
+            return
         if self._active_flow is finance_flow:
             if finance_flow.ask_date_first(self, text):
                 return
             self.start_request(text, text)
             return
         create_call = reminder_create.parse_request(text)
+        debug_log('ui: BUILD=%s reminder_create matched=%s call=%s' % (
+            BUILD, bool(create_call), create_call))
         if create_call is not None:
             self._live = {'time': config.now_text(), 'model': config.get_current_model(),
                           'user': text, 'ai': '', 'status': 'live'}
@@ -417,6 +443,7 @@ class MainView(ui.View):
             self._run_actions('', actions)
             return
         local_list = assistant_flow.local_list_action(text, self._turns)
+        debug_log('ui: BUILD=%s local_list matched=%s' % (BUILD, local_list is not None))
         if local_list is not None:
             self._live = {'time': config.now_text(), 'model': config.get_current_model(),
                           'user': text, 'ai': '', 'status': 'live'}
