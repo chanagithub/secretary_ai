@@ -24,10 +24,12 @@ from finance_overlays import ListPickOverlay, TextInputOverlay
 from debug_log import log as debug_log
 
 _PSEUDO_NOTE = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
-NOTES_DIAGNOSTIC_BUILD = 'notes-fake-names-1'
+NOTES_DIAGNOSTIC_BUILD = 'notes-buttons-fakenames-1'
 # ทดลองแยกสาเหตุล่ม: True = ไม่เรียก Shortcut อ่านรายชื่อ ใช้ชื่อสมมติ 3 ชื่อ และไม่ส่งคำสั่งบันทึกจริง
 # ตั้งเป็น False เมื่อทดลองเสร็จ
 DEBUG_FAKE_NAMES = True
+_PAGE_SIZE = 5       # รายชื่อโน้ตต่อหน้า (ปุ่ม) แทนตาราง
+_NEXT_PAGE = ('next',)  # ค่าพิเศษของปุ่ม 'หน้าถัดไป' (ไม่ใช่ str จึงไม่ชนกับชื่อโน้ต)
 debug_log('notes_flow BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
 
 
@@ -136,6 +138,7 @@ class NotesRunner:
         self._pick = None
         self._text = None
         self.append_timestamp = None
+        self._page = 0
 
     # ----- คิว -----
     def start(self):
@@ -269,10 +272,27 @@ class NotesRunner:
                               'ยังไม่ได้บันทึก "%s"' % (notes_shortcut.FOLDER_NAME, self.item['title']))
             self.step()
             return
-        items = [(name, name) for name in self.names]
-        self.host.show_overlay(ListPickOverlay(
-            'เลือกโน้ตที่จะต่อท้าย (%d โน้ต)' % len(items), items,
-            self.on_note_pick, self.on_cancel))
+        self._page = 0
+        self.show_note_page()
+
+    def show_note_page(self):
+        total = len(self.names)
+        pages = (total + _PAGE_SIZE - 1) // _PAGE_SIZE
+        start = self._page * _PAGE_SIZE
+        options = [(name, name) for name in self.names[start:start + _PAGE_SIZE]]
+        if start + _PAGE_SIZE < total:
+            options.append(('หน้าถัดไป ▶', _NEXT_PAGE))
+        title = 'เลือกโน้ตที่จะต่อท้าย (%d โน้ต)' % total
+        if pages > 1:
+            title += '\nหน้า %d/%d' % (self._page + 1, pages)
+        debug_log('notes picker (buttons): page=%d/%d options=%d' %
+                  (self._page + 1, pages, len(options)))
+        self.host.show_overlay(ChoiceOverlay(
+            title, options, self.on_note_pick, self.on_cancel))
+
+    @_guarded
+    def do_next_page(self):
+        self.show_note_page()
 
     def on_names_error(self, message):
         self._text = message
@@ -284,6 +304,10 @@ class NotesRunner:
         self.step()
 
     def on_note_pick(self, value):
+        if value is _NEXT_PAGE:
+            self._page += 1
+            ui.delay(self.do_next_page, 0.3)
+            return
         debug_log('notes list callback: value_empty=%s value_is_zero=%s' %
                   (not bool(str(value or '').strip()),
                    str(value or '').strip() == '0'))
