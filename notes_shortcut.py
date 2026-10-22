@@ -21,15 +21,19 @@ import time
 from urllib.parse import urlencode, quote
 
 import ui
+from debug_log import log as debug_log
 
 LIST_SHORTCUT_NAME = 'ทดสอบรายชื่อโน้ต'
 SAVE_SHORTCUT_NAME = 'AI SaveToNote'
 FOLDER_NAME = 'เลขา AI'
+NOTES_DIAGNOSTIC_BUILD = 'notes-zero-trace-1'
 MODES = ('new', 'append')
 
 _MARK = '__WAITING__'
 _POLL_SECONDS = 0.5
 _TIMEOUT_SECONDS = 30
+
+debug_log('notes_shortcut BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
 
 
 class NotesShortcutError(Exception):
@@ -124,6 +128,10 @@ class NoteListReader:
         # พอกลับมา ค่าใหม่อาจมาถึงแล้วแม้เกินเวลา
         if value is not None and value != _MARK:
             self._active = False
+            raw_lines = str(value).replace('\r', '\n').split('\n')
+            zero_lines = sum(1 for line in raw_lines if line.strip() == '0')
+            debug_log('notes list clipboard received: chars=%d lines=%d zero_lines=%d' %
+                      (len(str(value)), len(raw_lines), zero_lines))
             try:
                 clipboard.set('')  # ไม่ทิ้งรายชื่อโน้ตค้างในคลิปบอร์ด
             except Exception:

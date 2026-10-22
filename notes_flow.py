@@ -24,6 +24,8 @@ from finance_overlays import ListPickOverlay, TextInputOverlay
 from debug_log import log as debug_log
 
 _PSEUDO_NOTE = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
+NOTES_DIAGNOSTIC_BUILD = 'notes-zero-trace-1'
+debug_log('notes_flow BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
 
 
 def _note(text):
@@ -164,6 +166,9 @@ class NotesRunner:
         self.item = action
         self.mode = action.get('mode') or 'new'
         self.title = action['title']
+        debug_log('notes action: mode=%s empty_body=%s title_is_zero=%s' %
+                  (self.mode, not bool(action['content'].strip()),
+                   str(self.title or '').strip() == '0'))
         if self.mode == 'append':
             if not action['content'].strip():
                 self.lines.append('ยังไม่มีเนื้อหาที่จะต่อท้าย กรุณาระบุข้อความก่อนครับ')
@@ -243,6 +248,8 @@ class NotesRunner:
     # ----- 2ข: ต่อโน้ตเดิม เลือกจากรายการ -----
     def on_names(self, names):
         # ตรวจซ้ำที่ชั้น UI ด้วย เผื่อแหล่งรายชื่อหรือคลิปบอร์ดส่งค่า 0 ปะปนมา
+        debug_log('notes list parsed: names=%d has_zero=%s' %
+                  (len(names), any(str(name).strip() == '0' for name in names)))
         self.names = [str(name).strip() for name in names
                       if str(name).strip() and str(name).strip() != '0']
         ui.delay(self.do_names, 0.3)
@@ -275,6 +282,8 @@ class NotesRunner:
     @_guarded
     def do_note_pick(self):
         self.title = self._pick
+        debug_log('notes list selection: is_zero=%s' %
+                  (str(self.title or '').strip() == '0'))
         if str(self.title or '').strip() == '0':
             self.lines.append('รายชื่อโน้ตจาก Shortcut ไม่ถูกต้อง (ได้ค่า 0) ยังไม่ได้ส่งคำสั่งต่อท้าย')
             self.step()
@@ -317,6 +326,9 @@ class NotesRunner:
 
     def show_confirm(self):
         body = self._build_body()
+        debug_log('notes confirmation: mode=%s title_empty=%s title_is_zero=%s' %
+                  (self.mode, not bool(str(self.title or '').strip()),
+                   str(self.title or '').strip() == '0'))
         warning = ('ไม่ได้ใช้เนื้อหาจาก AI (ไม่ตรงคำพูด) ใช้ข้อความที่คุณพูดตามเดิม'
                    if self.item['used_fallback'] else '')
         self.host.show_overlay(ConfirmOverlay(
@@ -330,6 +342,9 @@ class NotesRunner:
     @_guarded
     def do_ok(self):
         body = self._build_body()
+        debug_log('notes send: mode=%s title_empty=%s title_is_zero=%s' %
+                  (self.mode, not bool(str(self.title or '').strip()),
+                   str(self.title or '').strip() == '0'))
         try:
             notes_shortcut.send_save(self.mode, self.title, body)
         except notes_shortcut.NotesShortcutError as e:
