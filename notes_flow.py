@@ -128,6 +128,7 @@ class NotesRunner:
         self.mode = None
         self.title = ''
         self.names = []
+        self.append_target_title = ''
         self.reader = None
         self._pick = None
         self._text = None
@@ -276,14 +277,22 @@ class NotesRunner:
         self.step()
 
     def on_note_pick(self, value):
+        debug_log('notes list callback: value_empty=%s value_is_zero=%s' %
+                  (not bool(str(value or '').strip()),
+                   str(value or '').strip() == '0'))
         self._pick = value
         ui.delay(self.do_note_pick, 0.3)
 
     @_guarded
     def do_note_pick(self):
-        self.title = self._pick
-        debug_log('notes list selection: is_zero=%s' %
-                  (str(self.title or '').strip() == '0'))
+        self.append_target_title = str(self._pick or '').strip()
+        self.title = self.append_target_title
+        debug_log('notes list selection: empty=%s is_zero=%s' %
+                  (not bool(self.append_target_title), self.append_target_title == '0'))
+        if not self.append_target_title:
+            self.lines.append('ไม่ได้รับชื่อโน้ตจากรายการที่เลือก ยังไม่ได้ส่งคำสั่งต่อท้าย')
+            self.step()
+            return
         if str(self.title or '').strip() == '0':
             self.lines.append('รายชื่อโน้ตจาก Shortcut ไม่ถูกต้อง (ได้ค่า 0) ยังไม่ได้ส่งคำสั่งต่อท้าย')
             self.step()
@@ -311,6 +320,11 @@ class NotesRunner:
     def do_append_timestamp_pick(self):
         self.append_timestamp = (datetime.datetime.now()
                                  if self._pick == 'with_timestamp' else None)
+        # เก็บชื่อปลายทางแยกจาก _pick ซึ่งถูกใช้กับตัวเลือกวันเวลา
+        if self.mode == 'append':
+            self.title = self.append_target_title
+        debug_log('notes after timestamp choice: title_empty=%s' %
+                  (not bool(str(self.title or '').strip())))
         self.show_confirm()
 
     # ----- 3: ยืนยันสุดท้าย -----
@@ -325,6 +339,10 @@ class NotesRunner:
         return nt.build_body(self.mode, content, datetime.date.today())
 
     def show_confirm(self):
+        if self.mode == 'append' and not str(self.title or '').strip():
+            self.lines.append('ไม่มีชื่อโน้ตปลายทาง ยังไม่ได้ส่งคำสั่งต่อท้าย')
+            self.step()
+            return
         body = self._build_body()
         debug_log('notes confirmation: mode=%s title_empty=%s title_is_zero=%s' %
                   (self.mode, not bool(str(self.title or '').strip()),
