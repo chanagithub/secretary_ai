@@ -24,7 +24,7 @@ from finance_overlays import ListPickOverlay, TextInputOverlay
 from debug_log import log as debug_log
 
 _PSEUDO_NOTE = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
-NOTES_DIAGNOSTIC_BUILD = 'notes-reuse-picker-fix-1'
+NOTES_DIAGNOSTIC_BUILD = 'notes-no-reuse-1'
 debug_log('notes_flow BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
 
 
@@ -129,7 +129,6 @@ class NotesRunner:
         self.title = ''
         self.names = []
         self.append_target_title = ''
-        self.append_picker = None
         self.reader = None
         self._pick = None
         self._text = None
@@ -264,10 +263,9 @@ class NotesRunner:
             self.step()
             return
         items = [(name, name) for name in self.names]
-        self.append_picker = ListPickOverlay(
+        self.host.show_overlay(ListPickOverlay(
             'เลือกโน้ตที่จะต่อท้าย (%d โน้ต)' % len(items), items,
-            self.on_note_pick, self.on_cancel, keep_open=True)
-        self.host.show_overlay(self.append_picker)
+            self.on_note_pick, self.on_cancel))
 
     def on_names_error(self, message):
         self._text = message
@@ -292,40 +290,29 @@ class NotesRunner:
         debug_log('notes list selection: empty=%s is_zero=%s' %
                   (not bool(self.append_target_title), self.append_target_title == '0'))
         if not self.append_target_title:
-            self._dismiss_append_picker()
             self.lines.append('ไม่ได้รับชื่อโน้ตจากรายการที่เลือก ยังไม่ได้ส่งคำสั่งต่อท้าย')
             self.step()
             return
         if str(self.title or '').strip() == '0':
-            self._dismiss_append_picker()
             self.lines.append('รายชื่อโน้ตจาก Shortcut ไม่ถูกต้อง (ได้ค่า 0) ยังไม่ได้ส่งคำสั่งต่อท้าย')
             self.step()
             return
         warning = nt.conflict_text(self.title, self.names)
         debug_log('notes append target checked: conflict=%s' % bool(warning))
         if warning:  # ชื่อซ้ำ/ซ้อน: ไม่ส่ง กันต่อท้ายผิดโน้ต
-            self._dismiss_append_picker()
             self.lines.append('ไม่ได้ส่ง: %s' % warning)
             self.step()
             return
-        debug_log('notes append: switching existing picker to timestamp choices')
+        debug_log('notes append: opening timestamp choice')
         self.show_append_timestamp_choice()
-
-    def _dismiss_append_picker(self):
-        picker = self.append_picker
-        self.append_picker = None
-        if picker is not None and picker.superview is not None:
-            picker._close()
 
     # ----- เลือกว่าจะใส่วันและเวลาในข้อความต่อท้ายหรือไม่ -----
     def show_append_timestamp_choice(self):
-        if self.append_picker is None:
-            raise RuntimeError('รายการเลือกโน้ตเดิมไม่พร้อมใช้งาน')
-        self.append_picker.replace_items(
+        self.host.show_overlay(ChoiceOverlay(
             'เพิ่มวันที่และเวลาปัจจุบันไหม?',
             [('เพิ่มวันที่และเวลา', 'with_timestamp'),
              ('ไม่เพิ่มวันที่และเวลา', 'without_timestamp')],
-            self.on_append_timestamp_pick, keep_open=False)
+            self.on_append_timestamp_pick, self.on_cancel))
 
     def on_append_timestamp_pick(self, value):
         self._pick = value
@@ -333,7 +320,6 @@ class NotesRunner:
 
     @_guarded
     def do_append_timestamp_pick(self):
-        self.append_picker = None
         self.append_timestamp = (datetime.datetime.now()
                                  if self._pick == 'with_timestamp' else None)
         # เก็บชื่อปลายทางแยกจาก _pick ซึ่งถูกใช้กับตัวเลือกวันเวลา

@@ -15,7 +15,7 @@ import ui
 from overlays import _Popup, _BLUE, _GREEN, _GRAY
 from debug_log import log as debug_log
 
-FINANCE_OVERLAYS_BUILD = 'notes-reuse-picker-2-steplog'
+FINANCE_OVERLAYS_BUILD = 'notes-no-reuse-1'
 debug_log('finance_overlays BUILD=%s loaded' % FINANCE_OVERLAYS_BUILD)
 
 
@@ -118,21 +118,6 @@ class ListPickOverlay(_CardView):
         debug_log('finance list init: table ready')
         self.cancel_btn = self._button('ยกเลิก', _GRAY, 'black', self._cancel_pressed)
         debug_log('finance list init: complete')
-
-    def replace_items(self, title, items, on_pick, keep_open=False):
-        """Reuse this picker for a second choice without creating another UI view."""
-        debug_log('finance list reuse: step1 begin')
-        self._items = list(items)
-        self._on_pick = on_pick
-        self._keep_open = bool(keep_open)
-        self._closing = False
-        debug_log('finance list reuse: step2 before title_label.text')
-        self.title_label.text = title
-        debug_log('finance list reuse: step3 before ds.items')
-        self._ds.items = [{'title': label} for label, _ in self._items]
-        debug_log('finance list reuse: step4 before table.reload')
-        self.table.reload()
-        debug_log('finance list reused: item_count=%d' % len(self._items))
 
     def _row_selected(self, sender):
         row = sender.selected_row
