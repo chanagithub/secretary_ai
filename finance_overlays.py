@@ -13,6 +13,10 @@ TextInputOverlay(title, initial, on_ok, on_cancel, keyboard='default')
 """
 import ui
 from overlays import _Popup, _BLUE, _GREEN, _GRAY
+from debug_log import log as debug_log
+
+FINANCE_OVERLAYS_BUILD = 'notes-pick-trace-1'
+debug_log('finance_overlays BUILD=%s loaded' % FINANCE_OVERLAYS_BUILD)
 
 
 class FinanceConfirmOverlay(_Popup):
@@ -105,9 +109,15 @@ class ListPickOverlay(_CardView):
 
     def _row_selected(self, sender):
         row = sender.selected_row
+        debug_log('finance list selection: row=%r item_count=%d' %
+                  (row, len(self._items)))
         if row is None or row < 0 or row >= len(self._items):
+            debug_log('finance list selection ignored: invalid_row=True')
             return
-        self._finish(self._on_pick, self._items[row][1])
+        value = self._items[row][1]
+        debug_log('finance list selection value_empty=%s' %
+                  (not bool(str(value or '').strip())))
+        self._finish(self._on_pick, value)
 
     def _cancel_pressed(self, sender):
         self._finish(self._on_cancel)
