@@ -15,7 +15,7 @@ import ui
 from overlays import _Popup, _BLUE, _GREEN, _GRAY
 from debug_log import log as debug_log
 
-FINANCE_OVERLAYS_BUILD = 'notes-pick-trace-2'
+FINANCE_OVERLAYS_BUILD = 'notes-reuse-picker-1'
 debug_log('finance_overlays BUILD=%s loaded' % FINANCE_OVERLAYS_BUILD)
 
 
@@ -93,13 +93,14 @@ class _CardView(ui.View):
 class ListPickOverlay(_CardView):
     ROW_H = 52
 
-    def __init__(self, title, items, on_pick, on_cancel):
+    def __init__(self, title, items, on_pick, on_cancel, keep_open=False):
         debug_log('finance list init: begin item_count=%d' % len(items))
         super().__init__(title)
         debug_log('finance list init: card ready')
         self._items = list(items)
         self._on_pick = on_pick
         self._on_cancel = on_cancel
+        self._keep_open = bool(keep_open)
         self._ds = ui.ListDataSource([{'title': label} for label, _ in self._items])
         debug_log('finance list init: data source ready')
         self._ds.action = self._row_selected  # bound method (sender = data source)
@@ -118,6 +119,17 @@ class ListPickOverlay(_CardView):
         self.cancel_btn = self._button('ยกเลิก', _GRAY, 'black', self._cancel_pressed)
         debug_log('finance list init: complete')
 
+    def replace_items(self, title, items, on_pick, keep_open=False):
+        """Reuse this picker for a second choice without creating another UI view."""
+        self._items = list(items)
+        self.title_label.text = title
+        self._on_pick = on_pick
+        self._keep_open = bool(keep_open)
+        self._closing = False
+        self._ds.items = [{'title': label} for label, _ in self._items]
+        self.table.reload()
+        debug_log('finance list reused: item_count=%d' % len(self._items))
+
     def _row_selected(self, sender):
         row = sender.selected_row
         debug_log('finance list selection: row=%r item_count=%d' %
@@ -128,7 +140,11 @@ class ListPickOverlay(_CardView):
         value = self._items[row][1]
         debug_log('finance list selection value_empty=%s' %
                   (not bool(str(value or '').strip())))
-        self._finish(self._on_pick, value)
+        if self._keep_open:
+            if self._on_pick is not None:
+                self._on_pick(value)
+        else:
+            self._finish(self._on_pick, value)
 
     def _cancel_pressed(self, sender):
         self._finish(self._on_cancel)
