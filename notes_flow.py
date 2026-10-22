@@ -24,10 +24,10 @@ from finance_overlays import ListPickOverlay, TextInputOverlay
 from debug_log import log as debug_log
 
 _PSEUDO_NOTE = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
-NOTES_DIAGNOSTIC_BUILD = 'notes-buttons-fakenames-1'
+NOTES_DIAGNOSTIC_BUILD = 'notes-buttons-1'
 # ทดลองแยกสาเหตุล่ม: True = ไม่เรียก Shortcut อ่านรายชื่อ ใช้ชื่อสมมติ 3 ชื่อ และไม่ส่งคำสั่งบันทึกจริง
 # ตั้งเป็น False เมื่อทดลองเสร็จ
-DEBUG_FAKE_NAMES = True
+DEBUG_FAKE_NAMES = False
 _PAGE_SIZE = 5       # รายชื่อโน้ตต่อหน้า (ปุ่ม) แทนตาราง
 _NEXT_PAGE = ('next',)  # ค่าพิเศษของปุ่ม 'หน้าถัดไป' (ไม่ใช่ str จึงไม่ชนกับชื่อโน้ต)
 debug_log('notes_flow BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
