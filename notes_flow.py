@@ -20,14 +20,11 @@ import ai_client
 import notes_shortcut
 import notes_tools as nt
 from overlays import ChoiceOverlay, ConfirmOverlay
-from finance_overlays import ListPickOverlay, TextInputOverlay
+from finance_overlays import TextInputOverlay
 from debug_log import log as debug_log
 
 _PSEUDO_NOTE = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
-NOTES_DIAGNOSTIC_BUILD = 'notes-buttons-1'
-# ทดลองแยกสาเหตุล่ม: True = ไม่เรียก Shortcut อ่านรายชื่อ ใช้ชื่อสมมติ 3 ชื่อ และไม่ส่งคำสั่งบันทึกจริง
-# ตั้งเป็น False เมื่อทดลองเสร็จ
-DEBUG_FAKE_NAMES = False
+NOTES_DIAGNOSTIC_BUILD = 'notes-continue-ask-1'
 _PAGE_SIZE = 5       # รายชื่อโน้ตต่อหน้า (ปุ่ม) แทนตาราง
 _NEXT_PAGE = ('next',)  # ค่าพิเศษของปุ่ม 'หน้าถัดไป' (ไม่ใช่ str จึงไม่ชนกับชื่อโน้ต)
 debug_log('notes_flow BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
@@ -177,14 +174,7 @@ class NotesRunner:
                   (self.mode, not bool(action['content'].strip()),
                    str(self.title or '').strip() == '0'))
         if self.mode == 'append':
-            if not action['content'].strip():
-                self.lines.append('ยังไม่มีเนื้อหาที่จะต่อท้าย กรุณาระบุข้อความก่อนครับ')
-                self.step()
-                return
-            if DEBUG_FAKE_NAMES:
-                debug_log('notes: DEBUG_FAKE_NAMES on, skipping NoteListReader')
-                self.on_names(['Fake note 1', 'Fake note 2', 'Fake note 3'])
-                return
+            # ไม่มีข้อความก็เริ่มได้: เลือกโน้ตก่อน แล้วค่อยถามข้อความ (show_append_text_input)
             self.reader = notes_shortcut.NoteListReader(self.on_names, self.on_names_error)
             self.reader.start()
             return
@@ -334,7 +324,36 @@ class NotesRunner:
             self.lines.append('ไม่ได้ส่ง: %s' % warning)
             self.step()
             return
+        if not self.item['content'].strip():  # สั่งต่อจากโน้ตเดิมโดยยังไม่บอกข้อความ
+            debug_log('notes append: asking for body text')
+            self.show_append_text_input()
+            return
         debug_log('notes append: opening timestamp choice')
+        self.show_append_timestamp_choice()
+
+    # ----- ต่อท้ายโดยยังไม่มีข้อความ: ถามข้อความหลังเลือกโน้ต -----
+    def show_append_text_input(self, initial=''):
+        self.host.show_overlay(TextInputOverlay(
+            'พิมพ์หรือพูดข้อความที่จะต่อท้าย', initial,
+            self.on_append_text, self.on_cancel))
+
+    def on_append_text(self, text):
+        self._text = text
+        ui.delay(self.do_append_text, 0.3)
+
+    @_guarded
+    def do_append_text(self):
+        text = str(self._text or '').strip()
+        if not text:
+            self.show_append_text_input()
+            return
+        if len(text) > nt.MAX_CONTENT:
+            self.lines.append('เนื้อหายาวเกินไป (%d ตัวอักษร เกิน %d) ยังไม่ได้ส่งคำสั่งต่อท้าย'
+                              % (len(text), nt.MAX_CONTENT))
+            self.step()
+            return
+        self.item['content'] = text
+        debug_log('notes append: body text received chars=%d' % len(text))
         self.show_append_timestamp_choice()
 
     # ----- เลือกว่าจะใส่วันและเวลาในข้อความต่อท้ายหรือไม่ -----
@@ -396,11 +415,6 @@ class NotesRunner:
         debug_log('notes send: mode=%s title_empty=%s title_is_zero=%s' %
                   (self.mode, not bool(str(self.title or '').strip()),
                    str(self.title or '').strip() == '0'))
-        if DEBUG_FAKE_NAMES and self.mode == 'append':
-            debug_log('notes send: skipped (DEBUG_FAKE_NAMES)')
-            self.lines.append('(ทดลองรายชื่อสมมติ: ไม่ได้ส่งคำสั่งไปยัง Shortcut)')
-            self.step()
-            return
         try:
             notes_shortcut.send_save(self.mode, self.title, body)
         except notes_shortcut.NotesShortcutError as e:

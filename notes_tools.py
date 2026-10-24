@@ -35,6 +35,8 @@ _MONTHS = ('ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', '�
 _CMD_RE = re.compile(
     r'^\s*(?:ช่วย)?(?:จดบันทึก|บันทึก|จด(?=\s|โน้ต|โน๊ต|ว่า|ลง))'
     r'(?:ลง)?(?:โน้ต|โน๊ต)?\s*(?:ให้)?(?:หน่อย)?(?:นะ)?(?:ครับ|ค่ะ|คะ)?\s*(?:ว่า)?[\s:：,，]*')
+# วลี "ต่อจากโน้ตเดิม" (รับทั้ง โน้ต/โน๊ต) = สั่งต่อท้ายโน้ตเดิม เช่นเดียวกับคำว่า ต่อท้าย
+_CONTINUE_RE = re.compile(r'ต่อจาก\s*โน[้๊]ต\s*เดิม')
 
 
 class NotesToolError(Exception):
@@ -157,6 +159,8 @@ def infer_title_only_request(source):
     text = str(source or '').strip()
     if not text or _has_explicit_body(text):
         return ''
+    if continue_body(text) is not None:  # สั่งต่อจากโน้ตเดิม ไม่ใช่คำขอสร้างโน้ตเปล่า
+        return ''
     if re.search(r'(?:ค้น|หา|อ่าน|เปิด|แสดง|มีโน้ต|โน้ตไหน|อะไร|อย่างไร|ทำไม|ไหม|หรือไม่|\?)', text, re.I):
         return ''
     if _requests_empty_new_note(text):
@@ -170,6 +174,9 @@ def infer_title_only_request(source):
 def infer_explicit_body_request(source):
     """แยกคำสั่งที่มีตัวบอกเนื้อหาชัดเจนไว้สำรองเมื่อ AI ไม่เรียกเครื่องมือ"""
     text = str(source or '').strip()
+    cont = continue_body(text)
+    if cont is not None:  # ต่อจากโน้ตเดิม: เนื้อหาว่างได้ (แอปจะถามหลังเลือกโน้ต)
+        return {'title': suggest_title(cont) or 'ข้อความต่อท้าย', 'content': cont}
     if not _has_explicit_body(text):
         if re.match(r'^\s*(?:ช่วย\s*)?(?:บันทึก|จดบันทึก|จด)\s+', text, re.I):
             content = strip_command(text)
@@ -183,9 +190,20 @@ def infer_explicit_body_request(source):
     return {'title': title, 'content': content}
 
 
+def continue_body(source):
+    """คำสั่งที่มีวลี "ต่อจากโน้ตเดิม": คืนข้อความที่เหลือ (ตัดวลีและคำสั่งนำหน้าออก, ว่างได้)
+    คืน None ถ้าไม่มีวลีนี้ (ใช้กับคำสั่งอื่นไม่ได้เปลี่ยนพฤติกรรมเดิม)"""
+    text = str(source or '')
+    match = _CONTINUE_RE.search(text)
+    if not match:
+        return None
+    return strip_command(text[:match.start()] + ' ' + text[match.end():]).strip()
+
+
 def requested_mode(source):
-    """ใช้ต่อท้ายเมื่อคำสั่งมีคำว่า ต่อท้าย; กรณีอื่นสร้างโน้ตใหม่"""
-    return 'append' if 'ต่อท้าย' in str(source or '') else 'new'
+    """ใช้ต่อท้ายเมื่อคำสั่งมีคำว่า ต่อท้าย หรือ ต่อจากโน้ตเดิม; กรณีอื่นสร้างโน้ตใหม่"""
+    text = str(source or '')
+    return 'append' if ('ต่อท้าย' in text or _CONTINUE_RE.search(text)) else 'new'
 
 
 def validate_call(arguments, source_text):
@@ -195,6 +213,16 @@ def validate_call(arguments, source_text):
     fallback = strip_command(source)
     raw_title = _norm(args.get('title'))[:MAX_TITLE].strip()
     ai_content = args.get('content')
+
+    cont = continue_body(source)
+    if cont is not None:
+        # ต่อจากโน้ตเดิม: เนื้อหามาจากคำพูดผู้ใช้เท่านั้น (ว่างได้ = แอปถามหลังเลือกโน้ต)
+        # ชื่อโน้ตปลายทางมาจากรายการที่เลือก ชื่อนี้ใช้แค่ในข้อความแจ้งเตือน
+        if len(cont) > MAX_CONTENT:
+            raise NotesToolError('เนื้อหายาวเกินไป (%d ตัวอักษร เกิน %d) แบ่งบันทึกเป็นหลายครั้งครับ'
+                                 % (len(cont), MAX_CONTENT))
+        return {'content': cont, 'title': suggest_title(cont) or 'ข้อความต่อท้าย',
+                'used_fallback': False}
 
     if _requests_empty_new_note(source):
         title = raw_title or _title_from_request(source)
