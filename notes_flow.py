@@ -24,7 +24,7 @@ from finance_overlays import TextInputOverlay
 from debug_log import log as debug_log
 
 _PSEUDO_NOTE = 'ขออภัยครับ ประมวลผลคำสั่งนี้ไม่สำเร็จ ลองพิมพ์ใหม่อีกครั้ง'
-NOTES_DIAGNOSTIC_BUILD = 'notes-continue-ask-1'
+NOTES_DIAGNOSTIC_BUILD = 'notes-named-target-1'
 _PAGE_SIZE = 5       # รายชื่อโน้ตต่อหน้า (ปุ่ม) แทนตาราง
 _NEXT_PAGE = ('next',)  # ค่าพิเศษของปุ่ม 'หน้าถัดไป' (ไม่ใช่ str จึงไม่ชนกับชื่อโน้ต)
 debug_log('notes_flow BUILD=%s loaded' % NOTES_DIAGNOSTIC_BUILD)
@@ -95,9 +95,12 @@ def prepare_actions(tool_calls, host=None):
             actions.append({'kind': 'note', 'text': 'ตรวจค่าไม่ผ่าน: %s' % e})
             continue
         saves += 1
+        source = call.get('source_text', '')
+        mode = nt.requested_mode(source)
         actions.append({'kind': 'save', 'content': item['content'], 'title': item['title'],
-                        'used_fallback': item['used_fallback'],
-                        'mode': nt.requested_mode(call.get('source_text', ''))})
+                        'used_fallback': item['used_fallback'], 'mode': mode,
+                        # ต่อท้ายโน้ต <ชื่อ> ...: ข้อความหลังคำสั่ง ไว้เทียบกับรายชื่อโน้ตจริง
+                        'name_tail': nt.named_note_request(source) if mode == 'append' else None})
     return actions
 
 
@@ -262,6 +265,16 @@ class NotesRunner:
                               'ยังไม่ได้บันทึก "%s"' % (notes_shortcut.FOLDER_NAME, self.item['title']))
             self.step()
             return
+        tail = self.item.get('name_tail')
+        if tail:  # คำสั่งบอกชื่อโน้ตมาด้วย: ถ้าตรงกับโน้ตในรายการ ใช้เลย ไม่ต้องให้เลือก
+            hit = nt.match_named_note(tail, self.names)
+            debug_log('notes append: name from command matched=%s' % bool(hit))
+            if hit:
+                name, rest = hit
+                self.item['content'] = rest  # ว่างได้ = ถามข้อความต่อ
+                self._pick = name
+                self.do_note_pick()  # ตรวจชื่อว่าง/0/ซ้ำซ้อน แล้วถามข้อความหรือวันเวลา
+                return
         self._page = 0
         self.show_note_page()
 

@@ -210,6 +210,39 @@ def continue_body(source):
     return strip_command(text[:start] + ' ' + text[end:]).strip()
 
 
+# รูป [บันทึก] ต่อท้ายโน้ต <ชื่อโน้ต> [ข้อความ] (ไม่มีคำว่า เดิม) ที่ขึ้นต้นคำสั่ง
+_NAMED_NOTE_RE = re.compile(
+    r'^\s*(?:ช่วย\s*)?(?:(?:จดบันทึก|บันทึก|จด)\s*)?ต่อ(?:จาก|ท้าย)\s*โน[้๊]ต(?!\s*เดิม)')
+_SEP = ' \t\r\n:：,，'
+
+
+def named_note_request(source):
+    """คำสั่งรูป [บันทึก] ต่อท้ายโน้ต <ชื่อโน้ต> [ข้อความ]: คืนข้อความหลังคำว่า "ต่อท้ายโน้ต"
+    (ว่างได้) เพื่อให้แอปเทียบกับรายชื่อโน้ตจริง; รูปอื่น (รวมที่มีคำว่า เดิม) คืน None"""
+    text = str(source or '')
+    match = _NAMED_NOTE_RE.match(text)
+    if not match:
+        return None
+    return text[match.end():].lstrip(_SEP).strip()
+
+
+def match_named_note(tail, names):
+    """tail ขึ้นต้นด้วยชื่อโน้ตในรายการหรือไม่: คืน (ชื่อโน้ต, ข้อความที่เหลือ) หรือ None
+    เทียบชื่อยาวสุดก่อน (ชื่อมีช่องว่างได้) และชื่อต้องจบที่ช่องว่าง/เครื่องหมาย/จบข้อความ"""
+    tail = str(tail or '').strip()
+    if not tail:
+        return None
+    for name in sorted(names, key=lambda n: len(_norm(n)), reverse=True):
+        parts = _norm(name).split()
+        if not parts:
+            continue
+        pattern = r'\s+'.join(re.escape(p) for p in parts)
+        match = re.match(pattern + r'(?=\s|$|[:：,，])', tail, re.I)
+        if match:
+            return name, tail[match.end():].lstrip(_SEP).strip()
+    return None
+
+
 def requested_mode(source):
     """ใช้ต่อท้ายเมื่อคำสั่งมีคำว่า ต่อท้าย หรือ ต่อจากโน้ตเดิม; กรณีอื่นสร้างโน้ตใหม่"""
     text = str(source or '')
