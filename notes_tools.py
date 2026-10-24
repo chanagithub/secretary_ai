@@ -35,8 +35,13 @@ _MONTHS = ('ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', '�
 _CMD_RE = re.compile(
     r'^\s*(?:ช่วย)?(?:จดบันทึก|บันทึก|จด(?=\s|โน้ต|โน๊ต|ว่า|ลง))'
     r'(?:ลง)?(?:โน้ต|โน๊ต)?\s*(?:ให้)?(?:หน่อย)?(?:นะ)?(?:ครับ|ค่ะ|คะ)?\s*(?:ว่า)?[\s:：,，]*')
-# วลี "ต่อจากโน้ตเดิม" (รับทั้ง โน้ต/โน๊ต) = สั่งต่อท้ายโน้ตเดิม เช่นเดียวกับคำว่า ต่อท้าย
-_CONTINUE_RE = re.compile(r'ต่อจาก\s*โน[้๊]ต\s*เดิม')
+# วลีสั่งต่อท้ายโน้ตเดิม (รับทั้ง โน้ต/โน๊ต): ต่อจากโน้ตเดิม / ต่อท้ายโน้ตเดิม / ต่อท้ายโน้ต / ต่อโน้ตเดิม
+_CONTINUE_RE = re.compile(
+    r'ต่อ(?:จาก|ท้าย)\s*โน[้๊]ต(?:\s*เดิม)?'
+    r'|ต่อ\s*โน[้๊]ต\s*เดิม')
+# คำว่า ต่อท้าย เดี่ยว ๆ ต้นคำสั่งและตามด้วยช่องว่าง เช่น "ต่อท้าย ซื้อนม" / "บันทึก ต่อท้าย ซื้อนม"
+# (ต่อท้ายที่อยู่กลางประโยค เช่น "ทดสอบต่อท้ายหนึ่ง" ไม่ถูกตัด)
+_LEADING_APPEND_RE = re.compile(r'^\s*(?:ช่วย\s*)?(?:(?:จดบันทึก|บันทึก|จด)\s*)?(ต่อท้าย)(?=\s)')
 
 
 class NotesToolError(Exception):
@@ -191,13 +196,18 @@ def infer_explicit_body_request(source):
 
 
 def continue_body(source):
-    """คำสั่งที่มีวลี "ต่อจากโน้ตเดิม": คืนข้อความที่เหลือ (ตัดวลีและคำสั่งนำหน้าออก, ว่างได้)
+    """คำสั่งที่มีวลีต่อท้ายโน้ตเดิม (ดู _CONTINUE_RE): คืนข้อความที่เหลือ (ตัดวลีและคำสั่งนำหน้าออก, ว่างได้)
     คืน None ถ้าไม่มีวลีนี้ (ใช้กับคำสั่งอื่นไม่ได้เปลี่ยนพฤติกรรมเดิม)"""
     text = str(source or '')
     match = _CONTINUE_RE.search(text)
-    if not match:
-        return None
-    return strip_command(text[:match.start()] + ' ' + text[match.end():]).strip()
+    if match:
+        start, end = match.span()
+    else:
+        lead = _LEADING_APPEND_RE.match(text)
+        if not lead:
+            return None
+        start, end = lead.span(1)
+    return strip_command(text[:start] + ' ' + text[end:]).strip()
 
 
 def requested_mode(source):
